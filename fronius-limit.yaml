@@ -1,16 +1,14 @@
+esphome:
+  name: fronius-limit
+  friendly_name: Fronius Primo Limit
+
 esp32:
   board: esp32dev
   framework:
     type: arduino
 
-# Učitavanje podrške za mrežni Modbus TCP (komunikacija preko routera bez žica)
-external_components:
-  - source: github://pebblebed-tech/esphome-modbus-tcp
-    components: [modbus_tcp]
-
 web_server:
   port: 80
-  version: 3
 
 wifi:
   ap:
@@ -19,7 +17,6 @@ wifi:
 
 captive_portal:
 
-# Lokalni upis IP adrese invertera na ekranu mobitela (ostaje samo u vašoj kući)
 text:
   - platform: template
     name: "IP adresa invertera"
@@ -29,7 +26,6 @@ text:
     restore_value: true
     initial_value: "192.168.1.50"
 
-# Glavni prekidač na mobitelu: Zero Export 0 W (ON / OFF)
 switch:
   - platform: template
     name: "Zero Export (0 W)"
@@ -37,7 +33,6 @@ switch:
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
 
-# Očitanja na ekranu mobitela
 sensor:
   - platform: template
     name: "Potrošnja kuće (W)"
