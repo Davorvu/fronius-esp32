@@ -1,8 +1,7 @@
 esphome:
   name: fronius-limit
   friendly_name: Fronius Primo Limit
-  includes:
-    - <WiFi.h>
+
 
 esp32:
   board: esp32dev
