@@ -1,0 +1,54 @@
+esphome:
+  name: fronius-limit
+  friendly_name: Fronius Primo Limit
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+web_server:
+  port: 80
+  version: 3
+
+wifi:
+  ap:
+    ssid: "Fronius-Limit-Setup"
+    password: "12345678"
+
+captive_portal:
+
+text:
+  - platform: template
+    name: "IP adresa invertera"
+    id: inverter_ip
+    mode: text
+    optimistic: true
+    restore_value: true
+    initial_value: "192.168.1.50"
+
+switch:
+  - platform: template
+    name: "Zero Export (0 W)"
+    id: zero_export_switch
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+sensor:
+  - platform: template
+    name: "Potrošnja kuæe (W)"
+    id: house_load_w
+    unit_of_measurement: "W"
+    accuracy_decimals: 0
+
+  - platform: template
+    name: "Proizvodnja panela (W)"
+    id: pv_power_w
+    unit_of_measurement: "W"
+    accuracy_decimals: 0
+
+  - platform: template
+    name: "Zadani limit invertera (%)"
+    id: applied_limit_pct
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
