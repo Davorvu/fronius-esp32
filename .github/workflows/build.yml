@@ -5,9 +5,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: esphome/build-action@v1
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          yaml_file: fronius-limit.yaml
+          python-version: '3.11'
+      - name: Install and Compile ESPHome
+        run: |
+          pip install esphome
+          esphome compile fronius-limit.yaml
       - uses: actions/upload-artifact@v4
         with:
           name: fronius-firmware
