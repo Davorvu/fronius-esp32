@@ -1,0 +1,14 @@
+name: Build ESPHome
+on: [workflow_dispatch, push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: esphome/build-action@v1
+        with:
+          yaml_file: fronius-limit.yaml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fronius-firmware
+          path: .esphome/build/fronius-limit/.pioenvs/fronius-limit/firmware.factory.bin
