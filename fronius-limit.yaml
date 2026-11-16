@@ -2,7 +2,6 @@ esphome:
   name: fronius-limit
   friendly_name: Fronius Primo Limit
 
-
 esp32:
   board: esp32dev
   framework:
@@ -12,6 +11,7 @@ web_server:
   port: 80
 
 wifi:
+  id: my_wifi
   ap:
     ssid: "Fronius-Limit-Setup"
     password: "12345678"
@@ -51,50 +51,69 @@ interval:
   - interval: 3s
     then:
       - lambda: |-
-          if (!WiFi.isConnected()) return;
-          WiFiClient client;
-          if (!client.connect(id(inverter_ip).state.c_str(), 502)) return;
+          if (!id(my_wifi).is_connected()) return;
+          int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+          if (sock < 0) return;
+
+          struct timeval tv;
+          tv.tv_sec = 0;
+          tv.tv_usec = 500000;
+          setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+          setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+          struct sockaddr_in dest;
+          dest.sin_family = AF_INET;
+          dest.sin_port = htons(502);
+          if (inet_pton(AF_INET, id(inverter_ip).state.c_str(), &dest.sin_addr) <= 0) {
+            close(sock);
+            return;
+          }
+
+          if (connect(sock, (struct sockaddr *)&dest, sizeof(dest)) != 0) {
+            close(sock);
+            return;
+          }
 
           // 1. Čitanje snage sa Smart Metera (Unit ID 240, SunSpec float 40097)
-          client.write((uint8_t)0x00); client.write((uint8_t)0x01);
-          client.write((uint8_t)0x00); client.write((uint8_t)0x00);
-          client.write((uint8_t)0x00); client.write((uint8_t)0x06);
-          client.write((uint8_t)0xF0); client.write((uint8_t)0x03);
-          client.write((uint8_t)0x9C); client.write((uint8_t)0x97);
-          client.write((uint8_t)0x00); client.write((uint8_t)0x02);
-
-          unsigned long t = millis();
-          while (client.available() < 13 && millis() - t < 500) delay(5);
+          uint8_t req_meter = 0;
+          uint8_t m0=0x00, m1=0x01, m2=0x00, m3=0x00, m4=0x00, m5=0x06, m6=0xF0, m7=0x03, m8=0x9C, m9=0x97, m10=0x00, m11=0x02;
+          send(sock, &m0, 1, 0); send(sock, &m1, 1, 0); send(sock, &m2, 1, 0); send(sock, &m3, 1, 0);
+          send(sock, &m4, 1, 0); send(sock, &m5, 1, 0); send(sock, &m6, 1, 0); send(sock, &m7, 1, 0);
+          send(sock, &m8, 1, 0); send(sock, &m9, 1, 0); send(sock, &m10, 1, 0); send(sock, &m11, 1, 0);
 
           float grid_w = 0;
-          if (client.available() >= 13) {
-            for (int i = 0; i < 9; i++) client.read();
-            uint32_t b1 = client.read();
-            uint32_t b2 = client.read();
-            uint32_t b3 = client.read();
-            uint32_t b4 = client.read();
+          uint8_t b = 0;
+          int count = 0;
+          uint32_t b1 = 0, b2 = 0, b3 = 0, b4 = 0;
+          while (count < 13 && recv(sock, &b, 1, 0) == 1) {
+            if (count == 9) b1 = b;
+            if (count == 10) b2 = b;
+            if (count == 11) b3 = b;
+            if (count == 12) b4 = b;
+            count++;
+          }
+          if (count == 13) {
             uint32_t raw = (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
             memcpy(&grid_w, &raw, sizeof(float));
           }
 
           // 2. Čitanje trenutne proizvodnje invertera (Unit ID 1, SunSpec float 40083)
-          client.write((uint8_t)0x00); client.write((uint8_t)0x02);
-          client.write((uint8_t)0x00); client.write((uint8_t)0x00);
-          client.write((uint8_t)0x00); client.write((uint8_t)0x06);
-          client.write((uint8_t)0x01); client.write((uint8_t)0x03);
-          client.write((uint8_t)0x9C); client.write((uint8_t)0x93);
-          client.write((uint8_t)0x00); client.write((uint8_t)0x02);
-
-          t = millis();
-          while (client.available() < 13 && millis() - t < 500) delay(5);
+          uint8_t i0=0x00, i1=0x02, i2=0x00, i3=0x00, i4=0x00, i5=0x06, i6=0x01, i7=0x03, i8=0x9C, i9=0x93, i10=0x00, i11=0x02;
+          send(sock, &i0, 1, 0); send(sock, &i1, 1, 0); send(sock, &i2, 1, 0); send(sock, &i3, 1, 0);
+          send(sock, &i4, 1, 0); send(sock, &i5, 1, 0); send(sock, &i6, 1, 0); send(sock, &i7, 1, 0);
+          send(sock, &i8, 1, 0); send(sock, &i9, 1, 0); send(sock, &i10, 1, 0); send(sock, &i11, 1, 0);
 
           float pv_w = 0;
-          if (client.available() >= 13) {
-            for (int i = 0; i < 9; i++) client.read();
-            uint32_t b1 = client.read();
-            uint32_t b2 = client.read();
-            uint32_t b3 = client.read();
-            uint32_t b4 = client.read();
+          count = 0;
+          b1 = 0; b2 = 0; b3 = 0; b4 = 0;
+          while (count < 13 && recv(sock, &b, 1, 0) == 1) {
+            if (count == 9) b1 = b;
+            if (count == 10) b2 = b;
+            if (count == 11) b3 = b;
+            if (count == 12) b4 = b;
+            count++;
+          }
+          if (count == 13) {
             uint32_t raw = (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
             memcpy(&pv_w, &raw, sizeof(float));
           }
@@ -114,20 +133,17 @@ interval:
 
           // 3. Upis limita u inverter (registar 40232 = WMaxLimPct, 40236 = WMaxLim_Ena)
           uint16_t pct_scaled = (uint16_t)(limit_pct * 100.0);
-          client.write((uint8_t)0x00); client.write((uint8_t)0x03);
-          client.write((uint8_t)0x00); client.write((uint8_t)0x00);
-          client.write((uint8_t)0x00); client.write((uint8_t)0x11);
-          client.write((uint8_t)0x01); client.write((uint8_t)0x10);
-          client.write((uint8_t)0x9D); client.write((uint8_t)0x28);
-          client.write((uint8_t)0x00); client.write((uint8_t)0x05);
-          client.write((uint8_t)0x0A);
-          client.write((uint8_t)(pct_scaled >> 8));
-          client.write((uint8_t)(pct_scaled & 0xFF));
-          client.write((uint8_t)0x00); client.write((uint8_t)0x00);
-          client.write((uint8_t)0x00); client.write((uint8_t)0x00);
-          client.write((uint8_t)0x00); client.write((uint8_t)0x00);
-          client.write((uint8_t)0x00); client.write((uint8_t)0x01);
+          uint8_t hi = (uint8_t)(pct_scaled >> 8);
+          uint8_t lo = (uint8_t)(pct_scaled & 0xFF);
+          uint8_t w0=0x00, w1=0x03, w2=0x00, w3=0x00, w4=0x00, w5=0x11, w6=0x01, w7=0x10;
+          uint8_t w8=0x9D, w9=0x28, w10=0x00, w11=0x05, w12=0x0A;
+          uint8_t z=0x00, one=0x01;
+          send(sock, &w0, 1, 0); send(sock, &w1, 1, 0); send(sock, &w2, 1, 0); send(sock, &w3, 1, 0);
+          send(sock, &w4, 1, 0); send(sock, &w5, 1, 0); send(sock, &w6, 1, 0); send(sock, &w7, 1, 0);
+          send(sock, &w8, 1, 0); send(sock, &w9, 1, 0); send(sock, &w10, 1, 0); send(sock, &w11, 1, 0);
+          send(sock, &w12, 1, 0); send(sock, &hi, 1, 0); send(sock, &lo, 1, 0);
+          send(sock, &z, 1, 0); send(sock, &z, 1, 0); send(sock, &z, 1, 0); send(sock, &z, 1, 0);
+          send(sock, &z, 1, 0); send(sock, &z, 1, 0); send(sock, &z, 1, 0); send(sock, &one, 1, 0);
 
-          t = millis();
-          while (client.available() < 12 && millis() - t < 500) delay(5);
-          client.stop();
+          while (count < 12 && recv(sock, &b, 1, 0) == 1) count++;
+          close(sock);
