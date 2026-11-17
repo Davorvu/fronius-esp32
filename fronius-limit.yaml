@@ -1,6 +1,6 @@
 esphome:
   name: fronius-limit
-  friendly_name: Fronius Primo Limit
+  friendly_name: Fronius Limit Regulator
 
 esp32:
   board: esp32dev
@@ -9,6 +9,18 @@ esp32:
 
 web_server:
   port: 80
+  version: 3
+  ota: true
+  sorting_groups:
+    - id: group_live
+      name: "1. Live mjerenja"
+      sorting_weight: 10
+    - id: group_balance
+      name: "2. Mjesečna bilanca (HEP 2026)"
+      sorting_weight: 20
+    - id: group_params
+      name: "3. Parametri i postavke"
+      sorting_weight: 30
 
 wifi:
   id: my_wifi
@@ -18,42 +30,250 @@ wifi:
 
 captive_portal:
 
-text:
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Europe/Zagreb
+
+output:
+  - platform: gpio
+    pin: GPIO2
+    id: blue_led
+
+globals:
+  - id: comm_ok
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: led_blink_state
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: saved_month
+    type: int
+    restore_value: yes
+    initial_value: '0'
+  - id: base_import_kwh
+    type: float
+    restore_value: yes
+    initial_value: '-1.0'
+  - id: base_export_kwh
+    type: float
+    restore_value: yes
+    initial_value: '-1.0'
+  - id: last_total_import_kwh
+    type: float
+    restore_value: no
+    initial_value: '0.0'
+  - id: last_total_export_kwh
+    type: float
+    restore_value: no
+    initial_value: '0.0'
+  - id: reset_requested
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+text_sensor:
   - platform: template
-    name: "IP adresa invertera"
-    id: inverter_ip
-    mode: text
-    optimistic: true
-    restore_value: true
-    initial_value: "192.168.1.50"
+    name: "Status sustava"
+    id: modbus_status
+    web_server:
+      sorting_weight: 1
 
 switch:
   - platform: template
-    name: "Zero Export (0 W)"
-    id: zero_export_switch
+    name: "A. Ručni limit izvoza"
+    id: manual_limit_switch
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
+    web_server:
+      sorting_weight: 2
+    on_turn_on:
+      - switch.turn_off: auto_balance_switch
+
+  - platform: template
+    name: "B. Auto balansiranje mjesec (HEP 2026)"
+    id: auto_balance_switch
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    web_server:
+      sorting_weight: 3
+    on_turn_on:
+      - switch.turn_off: manual_limit_switch
 
 sensor:
+  - platform: template
+    name: "Proizvodnja panela (W)"
+    id: pv_power_w
+    unit_of_measurement: "W"
+    accuracy_decimals: 0
+    web_server:
+      sorting_group_id: group_live
+      sorting_weight: 1
+
+  - platform: template
+    name: "Brojilo mreža (+uvoz / -izvoz) (W)"
+    id: grid_power_w
+    unit_of_measurement: "W"
+    accuracy_decimals: 0
+    web_server:
+      sorting_group_id: group_live
+      sorting_weight: 2
+
   - platform: template
     name: "Potrošnja kuće (W)"
     id: house_load_w
     unit_of_measurement: "W"
     accuracy_decimals: 0
+    web_server:
+      sorting_group_id: group_live
+      sorting_weight: 3
 
   - platform: template
     name: "Zadani limit invertera (%)"
     id: applied_limit_pct
     unit_of_measurement: "%"
     accuracy_decimals: 1
+    web_server:
+      sorting_group_id: group_live
+      sorting_weight: 4
+
+  - platform: template
+    name: "Mjesečno preuzeto (kWh)"
+    id: month_import_kwh
+    unit_of_measurement: "kWh"
+    accuracy_decimals: 1
+    web_server:
+      sorting_group_id: group_balance
+      sorting_weight: 1
+
+  - platform: template
+    name: "Mjesečno predano (kWh)"
+    id: month_export_kwh
+    unit_of_measurement: "kWh"
+    accuracy_decimals: 1
+    web_server:
+      sorting_group_id: group_balance
+      sorting_weight: 2
+
+  - platform: template
+    name: "Mjesečna bilanca (+kredit / -višak) (kWh)"
+    id: month_balance_kwh
+    unit_of_measurement: "kWh"
+    accuracy_decimals: 1
+    web_server:
+      sorting_group_id: group_balance
+      sorting_weight: 3
+
+button:
+  - platform: template
+    name: "Resetiraj mjesečni brojač na 0"
+    web_server:
+      sorting_group_id: group_balance
+      sorting_weight: 4
+    on_press:
+      - lambda: |-
+          id(reset_requested) = true;
+
+text:
+  - platform: template
+    name: "1. IP adresa invertera"
+    id: inverter_ip
+    mode: text
+    optimistic: true
+    restore_value: true
+    initial_value: "192.168.1.50"
+    web_server:
+      sorting_group_id: group_params
+      sorting_weight: 1
+
+number:
+  - platform: template
+    name: "2. Nazivna snaga invertera (W)"
+    id: inverter_max_w
+    min_value: 1000
+    max_value: 50000
+    step: 10
+    unit_of_measurement: "W"
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 4000
+    web_server:
+      sorting_group_id: group_params
+      sorting_weight: 2
+
+  - platform: template
+    name: "3. Dozvoljeni izvoz u mrežu (W)"
+    id: max_export_w
+    min_value: 0
+    max_value: 50000
+    step: 10
+    unit_of_measurement: "W"
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+    web_server:
+      sorting_group_id: group_params
+      sorting_weight: 3
+
+  - platform: template
+    name: "4. Sigurnosna rezerva (W)"
+    id: safety_margin_w
+    min_value: 0
+    max_value: 1000
+    step: 10
+    unit_of_measurement: "W"
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 50
+    web_server:
+      sorting_group_id: group_params
+      sorting_weight: 4
+
+  - platform: template
+    name: "5. Početni kredit mjeseca (kWh)"
+    id: initial_credit_kwh
+    min_value: -5000
+    max_value: 5000
+    step: 1
+    unit_of_measurement: "kWh"
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+    web_server:
+      sorting_group_id: group_params
+      sorting_weight: 5
 
 interval:
+  - interval: 300ms
+    then:
+      - lambda: |-
+          if (id(comm_ok)) {
+            id(blue_led).turn_on();
+          } else {
+            id(led_blink_state) = !id(led_blink_state);
+            if (id(led_blink_state)) id(blue_led).turn_on();
+            else id(blue_led).turn_off();
+          }
+
   - interval: 3s
     then:
       - lambda: |-
-          if (!id(my_wifi).is_connected()) return;
+          if (!id(my_wifi).is_connected()) {
+            id(comm_ok) = false;
+            id(modbus_status).publish_state("Nema Wi-Fi veze");
+            return;
+          }
           int sock = ::lwip_socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
-          if (sock < 0) return;
+          if (sock < 0) {
+            id(comm_ok) = false;
+            return;
+          }
 
           struct timeval tv;
           tv.tv_sec = 0;
@@ -65,16 +285,19 @@ interval:
           dest.sin_family = AF_INET;
           dest.sin_port = htons(502);
           if (::inet_pton(AF_INET, id(inverter_ip).state.c_str(), &dest.sin_addr) <= 0) {
+            id(comm_ok) = false;
+            id(modbus_status).publish_state("Neispravna IP adresa");
             ::lwip_close(sock);
             return;
           }
 
           if (::lwip_connect(sock, (struct sockaddr *)&dest, sizeof(dest)) != 0) {
+            id(comm_ok) = false;
+            id(modbus_status).publish_state("Greška spajanja na inverter");
             ::lwip_close(sock);
             return;
           }
 
-          // 1. Čitanje snage sa Smart Metera (Unit ID 240, SunSpec float 40097)
           uint8_t m0=0x00, m1=0x01, m2=0x00, m3=0x00, m4=0x00, m5=0x06, m6=0xF0, m7=0x03, m8=0x9C, m9=0x97, m10=0x00, m11=0x02;
           ::lwip_send(sock, &m0, 1, 0); ::lwip_send(sock, &m1, 1, 0); ::lwip_send(sock, &m2, 1, 0); ::lwip_send(sock, &m3, 1, 0);
           ::lwip_send(sock, &m4, 1, 0); ::lwip_send(sock, &m5, 1, 0); ::lwip_send(sock, &m6, 1, 0); ::lwip_send(sock, &m7, 1, 0);
@@ -91,12 +314,73 @@ interval:
             if (count == 12) b4 = b;
             count++;
           }
-          if (count == 13) {
-            uint32_t raw = (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
-            memcpy(&grid_w, &raw, sizeof(float));
+          if (count < 13) {
+            id(comm_ok) = false;
+            id(modbus_status).publish_state("Smart Meter ne odgovara");
+            ::lwip_close(sock);
+            return;
+          }
+          uint32_t raw_m = (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
+          memcpy(&grid_w, &raw_m, sizeof(float));
+          id(grid_power_w).publish_state(grid_w);
+
+          // 2. Čitanje ukupne energije
+          uint8_t e0=0x00, e1=0x04, e2=0x00, e3=0x00, e4=0x00, e5=0x06, e6=0xF0, e7=0x03, e8=0x9C, e9=0xC0, e10=0x00, e11=0x10;
+          ::lwip_send(sock, &e0, 1, 0); ::lwip_send(sock, &e1, 1, 0); ::lwip_send(sock, &e2, 1, 0); ::lwip_send(sock, &e3, 1, 0);
+          ::lwip_send(sock, &e4, 1, 0); ::lwip_send(sock, &e5, 1, 0); ::lwip_send(sock, &e6, 1, 0); ::lwip_send(sock, &e7, 1, 0);
+          ::lwip_send(sock, &e8, 1, 0); ::lwip_send(sock, &e9, 1, 0); ::lwip_send(sock, &e10, 1, 0); ::lwip_send(sock, &e11, 1, 0);
+
+          count = 0;
+          uint32_t exp_b1=0, exp_b2=0, exp_b3=0, exp_b4=0;
+          uint32_t imp_b1=0, imp_b2=0, imp_b3=0, imp_b4=0;
+          while (count < 41 && ::lwip_recv(sock, &b, 1, 0) == 1) {
+            if (count == 9) exp_b1 = b;
+            if (count == 10) exp_b2 = b;
+            if (count == 11) exp_b3 = b;
+            if (count == 12) exp_b4 = b;
+            if (count == 25) imp_b1 = b;
+            if (count == 26) imp_b2 = b;
+            if (count == 27) imp_b3 = b;
+            if (count == 28) imp_b4 = b;
+            count++;
+          }
+          if (count == 41) {
+            uint32_t raw_exp = (exp_b1 << 24) | (exp_b2 << 16) | (exp_b3 << 8) | exp_b4;
+            uint32_t raw_imp = (imp_b1 << 24) | (imp_b2 << 16) | (imp_b3 << 8) | imp_b4;
+            float tot_exp_wh = 0, tot_imp_wh = 0;
+            memcpy(&tot_exp_wh, &raw_exp, sizeof(float));
+            memcpy(&tot_imp_wh, &raw_imp, sizeof(float));
+            id(last_total_export_kwh) = tot_exp_wh / 1000.0;
+            id(last_total_import_kwh) = tot_imp_wh / 1000.0;
+
+            auto now = id(sntp_time).now();
+            if (now.is_valid()) {
+              if (id(saved_month) != 0 && id(saved_month) != now.month) {
+                id(reset_requested) = true;
+                auto call = id(initial_credit_kwh).make_call();
+                call.set_value(0.0);
+                call.perform();
+              }
+              id(saved_month) = now.month;
+            }
+
+            if (id(base_import_kwh) < 0.0 || id(reset_requested)) {
+              id(base_import_kwh) = id(last_total_import_kwh);
+              id(base_export_kwh) = id(last_total_export_kwh);
+              id(reset_requested) = false;
+            }
           }
 
-          // 2. Čitanje trenutne proizvodnje invertera (Unit ID 1, SunSpec float 40083)
+          float m_imp = id(last_total_import_kwh) - id(base_import_kwh);
+          float m_exp = id(last_total_export_kwh) - id(base_export_kwh);
+          if (m_imp < 0) m_imp = 0;
+          if (m_exp < 0) m_exp = 0;
+          float balance_kwh = m_imp - m_exp + id(initial_credit_kwh).state;
+
+          id(month_import_kwh).publish_state(m_imp);
+          id(month_export_kwh).publish_state(m_exp);
+          id(month_balance_kwh).publish_state(balance_kwh);
+
           uint8_t i0=0x00, i1=0x02, i2=0x00, i3=0x00, i4=0x00, i5=0x06, i6=0x01, i7=0x03, i8=0x9C, i9=0x93, i10=0x00, i11=0x02;
           ::lwip_send(sock, &i0, 1, 0); ::lwip_send(sock, &i1, 1, 0); ::lwip_send(sock, &i2, 1, 0); ::lwip_send(sock, &i3, 1, 0);
           ::lwip_send(sock, &i4, 1, 0); ::lwip_send(sock, &i5, 1, 0); ::lwip_send(sock, &i6, 1, 0); ::lwip_send(sock, &i7, 1, 0);
@@ -112,25 +396,47 @@ interval:
             if (count == 12) b4 = b;
             count++;
           }
-          if (count == 13) {
-            uint32_t raw = (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
-            memcpy(&pv_w, &raw, sizeof(float));
+          if (count < 13) {
+            id(comm_ok) = false;
+            id(modbus_status).publish_state("Inverter ne odgovara");
+            ::lwip_close(sock);
+            return;
           }
+          uint32_t raw_i = (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
+          memcpy(&pv_w, &raw_i, sizeof(float));
+          id(pv_power_w).publish_state(pv_w);
 
-          // Izračun potrošnje kuće i limita za 4000 W inverter
           float house_w = pv_w + grid_w;
           if (house_w < 0) house_w = 0;
           id(house_load_w).publish_state(house_w);
 
+          float max_w = id(inverter_max_w).state;
+          if (max_w < 100.0) max_w = 4000.0;
+          float allowed_export = id(max_export_w).state;
+          float margin = id(safety_margin_w).state;
+
           float limit_pct = 100.0;
-          if (id(zero_export_switch).state) {
-            limit_pct = (house_w / 4000.0) * 100.0;
-            if (limit_pct > 100.0) limit_pct = 100.0;
-            if (limit_pct < 0.0) limit_pct = 0.0;
+          if (id(manual_limit_switch).state) {
+            float target_w = house_w + allowed_export - margin;
+            if (target_w < 0.0) target_w = 0.0;
+            limit_pct = (target_w / max_w) * 100.0;
+            id(modbus_status).publish_state("Aktivan: Ručni limit");
+          } else if (id(auto_balance_switch).state) {
+            float effective_export = (balance_kwh > 1.0) ? allowed_export : 0.0;
+            float target_w = house_w + effective_export - margin;
+            if (target_w < 0.0) target_w = 0.0;
+            limit_pct = (target_w / max_w) * 100.0;
+            if (balance_kwh > 1.0) id(modbus_status).publish_state("Aktivan: Auto balans (Izvoz OK)");
+            else id(modbus_status).publish_state("Aktivan: Auto balans (0 W limit)");
+          } else {
+            limit_pct = 100.0;
+            id(modbus_status).publish_state("Limit isključen (100 %)");
           }
+
+          if (limit_pct > 100.0) limit_pct = 100.0;
+          if (limit_pct < 0.0) limit_pct = 0.0;
           id(applied_limit_pct).publish_state(limit_pct);
 
-          // 3. Upis limita u inverter (registar 40232 = WMaxLimPct, 40236 = WMaxLim_Ena)
           uint16_t pct_scaled = (uint16_t)(limit_pct * 100.0);
           uint8_t hi = (uint8_t)(pct_scaled >> 8);
           uint8_t lo = (uint8_t)(pct_scaled & 0xFF);
@@ -147,3 +453,4 @@ interval:
           count = 0;
           while (count < 12 && ::lwip_recv(sock, &b, 1, 0) == 1) count++;
           ::lwip_close(sock);
+          id(comm_ok) = true;
