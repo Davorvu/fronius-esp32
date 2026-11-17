@@ -10,7 +10,6 @@ esp32:
 web_server:
   port: 80
   version: 3
-  ota: true
   sorting_groups:
     - id: group_live
       name: "1. Live mjerenja"
