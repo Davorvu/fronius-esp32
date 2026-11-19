@@ -25,9 +25,10 @@ wifi:
   id: my_wifi
   ssid: "Optima-025080"
   password: "OPTIMA2936502232"
-  manual_ip: 192.168.100.222
-  gateway: 192.168.100.1
-  subnet: 255.255.255.0
+  manual_ip: 
+    static_ip: 192.168.100.222
+    gateway: 192.168.100.1
+    subnet: 255.255.255.0
   ap:
     ssid: "Fronius-Limit-Setup"
     password: "12345678"
