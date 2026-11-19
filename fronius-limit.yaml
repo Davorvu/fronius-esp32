@@ -188,7 +188,7 @@ text:
     mode: text
     optimistic: true
     restore_value: true
-    initial_value: "192.168.1.50"
+    initial_value: "192.168.100.200"
     web_server:
       sorting_group_id: group_params
       sorting_weight: 1
@@ -204,7 +204,7 @@ number:
     mode: box
     optimistic: true
     restore_value: true
-    initial_value: 4000
+    initial_value: 3680
     web_server:
       sorting_group_id: group_params
       sorting_weight: 2
@@ -298,8 +298,8 @@ interval:
           FD_ZERO(&fdset);
           FD_SET(sock, &fdset);
           struct timeval tv_conn;
-          tv_conn.tv_sec = 0;
-          tv_conn.tv_usec = 300000;
+          tv_conn.tv_sec = 2;
+          tv_conn.tv_usec = 0;
 
           if (::lwip_select(sock + 1, NULL, &fdset, NULL, &tv_conn) <= 0) {
             id(comm_ok) = false;
