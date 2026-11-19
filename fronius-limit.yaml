@@ -9,7 +9,7 @@ esp32:
 
 web_server:
   port: 80
-  version: 3
+  version: 2
   sorting_groups:
     - id: group_live
       name: "1. Live mjerenja"
@@ -274,12 +274,6 @@ interval:
             return;
           }
 
-          struct timeval tv;
-          tv.tv_sec = 0;
-          tv.tv_usec = 500000;
-          ::lwip_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-          ::lwip_setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-
           struct sockaddr_in dest;
           dest.sin_family = AF_INET;
           dest.sin_port = htons(502);
@@ -290,12 +284,39 @@ interval:
             return;
           }
 
-          if (::lwip_connect(sock, (struct sockaddr *)&dest, sizeof(dest)) != 0) {
+          int flags = ::lwip_fcntl(sock, F_GETFL, 0);
+          ::lwip_fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+          ::lwip_connect(sock, (struct sockaddr *)&dest, sizeof(dest));
+
+          fd_set fdset;
+          FD_ZERO(&fdset);
+          FD_SET(sock, &fdset);
+          struct timeval tv_conn;
+          tv_conn.tv_sec = 0;
+          tv_conn.tv_usec = 300000;
+
+          if (::lwip_select(sock + 1, NULL, &fdset, NULL, &tv_conn) <= 0) {
             id(comm_ok) = false;
             id(modbus_status).publish_state("Greška spajanja na inverter");
             ::lwip_close(sock);
             return;
           }
+          int so_error = 0;
+          socklen_t len = sizeof(so_error);
+          ::lwip_getsockopt(sock, SOL_SOCKET, SO_ERROR, &so_error, &len);
+          if (so_error != 0) {
+            id(comm_ok) = false;
+            id(modbus_status).publish_state("Greška spajanja na inverter");
+            ::lwip_close(sock);
+            return;
+          }
+          ::lwip_fcntl(sock, F_SETFL, flags);
+
+          struct timeval tv;
+          tv.tv_sec = 0;
+          tv.tv_usec = 300000;
+          ::lwip_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+          ::lwip_setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
           uint8_t m0=0x00, m1=0x01, m2=0x00, m3=0x00, m4=0x00, m5=0x06, m6=0xF0, m7=0x03, m8=0x9C, m9=0x97, m10=0x00, m11=0x02;
           ::lwip_send(sock, &m0, 1, 0); ::lwip_send(sock, &m1, 1, 0); ::lwip_send(sock, &m2, 1, 0); ::lwip_send(sock, &m3, 1, 0);
