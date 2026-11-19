@@ -266,7 +266,7 @@ interval:
             else id(blue_led).turn_off();
           }
 
-  - interval: 3s
+  - interval: 5s
     then:
       - lambda: |-
           if (!id(my_wifi).is_connected()) {
@@ -349,7 +349,7 @@ interval:
           uint32_t raw_m = (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
           memcpy(&grid_w, &raw_m, sizeof(float));
           id(grid_power_w).publish_state(grid_w);
-
+          delay(150);
           // 2. Čitanje ukupne energije
           uint8_t e0=0x00, e1=0x04, e2=0x00, e3=0x00, e4=0x00, e5=0x06, e6=0xF0, e7=0x03, e8=0x9C, e9=0xC0, e10=0x00, e11=0x10;
           ::lwip_send(sock, &e0, 1, 0); ::lwip_send(sock, &e1, 1, 0); ::lwip_send(sock, &e2, 1, 0); ::lwip_send(sock, &e3, 1, 0);
@@ -406,7 +406,7 @@ interval:
           id(month_import_kwh).publish_state(m_imp);
           id(month_export_kwh).publish_state(m_exp);
           id(month_balance_kwh).publish_state(balance_kwh);
-
+          delay(150);
           uint8_t i0=0x00, i1=0x02, i2=0x00, i3=0x00, i4=0x00, i5=0x06, i6=0x01, i7=0x03, i8=0x9C, i9=0x9B, i10=0x00, i11=0x02;
           ::lwip_send(sock, &i0, 1, 0); ::lwip_send(sock, &i1, 1, 0); ::lwip_send(sock, &i2, 1, 0); ::lwip_send(sock, &i3, 1, 0);
           ::lwip_send(sock, &i4, 1, 0); ::lwip_send(sock, &i5, 1, 0); ::lwip_send(sock, &i6, 1, 0); ::lwip_send(sock, &i7, 1, 0);
