@@ -23,6 +23,8 @@ web_server:
 
 wifi:
   id: my_wifi
+  ssid: "Optima-025080"
+  password: "OPTIMA2936502232"
   ap:
     ssid: "Fronius-Limit-Setup"
     password: "12345678"
