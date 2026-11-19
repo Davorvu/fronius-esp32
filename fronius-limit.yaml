@@ -15,7 +15,7 @@ web_server:
       name: "1. Live mjerenja"
       sorting_weight: 10
     - id: group_balance
-      name: "2. Mjesečna bilanca (HEP 2026)"
+      name: "2. Mjesečna bilanca (HEP)"
       sorting_weight: 20
     - id: group_params
       name: "3. Parametri i postavke"
@@ -98,7 +98,7 @@ switch:
       - switch.turn_off: auto_balance_switch
 
   - platform: template
-    name: "B. Auto balansiranje mjesec (HEP 2026)"
+    name: "B. Auto balansiranje mjesec (HEP)"
     id: auto_balance_switch
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
@@ -266,7 +266,7 @@ interval:
             else id(blue_led).turn_off();
           }
 
-  - interval: 5s
+  - interval: 6s
     then:
       - lambda: |-
           if (!id(my_wifi).is_connected()) {
@@ -319,8 +319,8 @@ interval:
           ::lwip_fcntl(sock, F_SETFL, flags);
 
           struct timeval tv;
-          tv.tv_sec = 2;
-          tv.tv_usec = 0;
+          tv.tv_sec = 0;
+          tv.tv_usec = 800000;
           ::lwip_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
           ::lwip_setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
