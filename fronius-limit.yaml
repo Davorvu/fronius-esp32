@@ -7,6 +7,7 @@ esp32:
   framework:
     type: arduino
 logger:
+  level: ERROR
 ota:
   platform: esphome
 web_server:
@@ -353,7 +354,7 @@ interval:
           id(grid_power_w).publish_state(grid_w);
           delay(150);
           // 2. Čitanje ukupne energije
-          uint8_t e0=0x00, e1=0x04, e2=0x00, e3=0x00, e4=0x00, e5=0x06, e6=0xF0, e7=0x03, e8=0x9C, e9=0xC0, e10=0x00, e11=0x10;
+          uint8_t e0=0x00, e1=0x04, e2=0x00, e3=0x00, e4=0x00, e5=0x06, e6=0xF0, e7=0x03, e8=0x9C, e9=0xC1, e10=0x00, e11=0x10;
           ::lwip_send(sock, &e0, 1, 0); ::lwip_send(sock, &e1, 1, 0); ::lwip_send(sock, &e2, 1, 0); ::lwip_send(sock, &e3, 1, 0);
           ::lwip_send(sock, &e4, 1, 0); ::lwip_send(sock, &e5, 1, 0); ::lwip_send(sock, &e6, 1, 0); ::lwip_send(sock, &e7, 1, 0);
           ::lwip_send(sock, &e8, 1, 0); ::lwip_send(sock, &e9, 1, 0); ::lwip_send(sock, &e10, 1, 0); ::lwip_send(sock, &e11, 1, 0);
