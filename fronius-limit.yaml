@@ -94,7 +94,7 @@ switch:
     name: "A. Ručni limit izvoza"
     id: manual_limit_switch
     optimistic: true
-    restore_mode: RESTORE_DEFAULT_ON
+    restore_mode: RESTORE_DEFAULT_OFF
     web_server:
       sorting_weight: 2
     on_turn_on:
@@ -222,7 +222,7 @@ number:
     mode: box
     optimistic: true
     restore_value: true
-    initial_value: 0
+    initial_value: 3680
     web_server:
       sorting_group_id: group_params
       sorting_weight: 3
