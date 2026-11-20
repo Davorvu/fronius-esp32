@@ -228,6 +228,7 @@ button:
             id(params_status).publish_state(buf);
           } else {
             id(params_status).publish_state("Spremljeno i aktivno");
+          }  
   - platform: template
     name: "Resetiraj mjesečni brojač na 0"
     web_server:
