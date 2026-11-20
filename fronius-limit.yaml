@@ -48,7 +48,6 @@ output:
   - platform: gpio
     pin: GPIO2
     id: blue_led
-
 globals:
   - id: comm_ok
     type: bool
@@ -82,7 +81,7 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
- - id: active_max_w
+  - id: active_max_w  
     type: float
     restore_value: yes
     initial_value: '3680.0'
