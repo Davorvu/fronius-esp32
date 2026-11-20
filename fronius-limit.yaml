@@ -292,7 +292,7 @@ number:
       sorting_group_id: group_params
       sorting_weight: 5
 button:
- - platform: template
+  - platform: template
     name: "6. Spremi i primijeni postavke"
     web_server:
       sorting_group_id: group_params
