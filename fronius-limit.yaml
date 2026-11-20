@@ -7,7 +7,7 @@ esp32:
   framework:
     type: arduino
 logger:
-  level: ERROR
+  level: INFO
 ota:
   platform: esphome
 web_server:
