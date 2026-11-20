@@ -8,7 +8,7 @@ esp32:
     type: arduino
 logger:
 ota:
-  -platform: esphome
+  platform: esphome
 web_server:
   port: 80
   version: 3
