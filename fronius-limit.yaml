@@ -310,7 +310,6 @@ number:
       sorting_group_id: group_params
       sorting_weight: 5
 
-          }
 interval:
   - interval: 300ms
     then:
