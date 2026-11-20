@@ -496,10 +496,10 @@ interval:
           if (house_w < 0) house_w = 0;
           id(house_load_w).publish_state(house_w);
 
-          float max_w = id(active_max_w).state;
+          float max_w = id(active_max_w);
           if (max_w < 100.0) max_w = 4000.0;
-          float allowed_export = id(active_export_w).state;
-          float margin = id(active_margin_w).state;
+          float allowed_export = id(active_export_w);
+          float margin = id(active_margin_w);
 
           float limit_pct = 100.0;
           if (id(manual_limit_switch).state) {
