@@ -26,6 +26,8 @@ web_server:
 
 wifi:
   id: my_wifi
+  ssid: "Postavi-WiFi"
+  password: "postavipassword"
   ap:
     ssid: "Fronius-Limit-Setup"
     password: "12345678"
