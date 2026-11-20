@@ -211,6 +211,24 @@ sensor:
 
 button:
   - platform: template
+    name: "6. Spremi i primijeni postavke"
+    web_server:
+      sorting_group_id: group_params
+      sorting_weight: 6
+    on_press:
+      - lambda: |-
+          id(active_max_w) = id(inverter_max_w).state;
+          id(active_export_w) = id(max_export_w).state;
+          id(active_margin_w) = id(safety_margin_w).state;
+          id(active_credit_kwh) = id(initial_credit_kwh).state;
+          auto now = id(sntp_time).now();
+          if (now.is_valid()) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "Spremljeno (%02d:%02d:%02d)", now.hour, now.minute, now.second);
+            id(params_status).publish_state(buf);
+          } else {
+            id(params_status).publish_state("Spremljeno i aktivno");
+  - platform: template
     name: "Resetiraj mjesečni brojač na 0"
     web_server:
       sorting_group_id: group_balance
@@ -291,25 +309,7 @@ number:
     web_server:
       sorting_group_id: group_params
       sorting_weight: 5
-button:
-  - platform: template
-    name: "6. Spremi i primijeni postavke"
-    web_server:
-      sorting_group_id: group_params
-      sorting_weight: 6
-    on_press:
-      - lambda: |-
-          id(active_max_w) = id(inverter_max_w).state;
-          id(active_export_w) = id(max_export_w).state;
-          id(active_margin_w) = id(safety_margin_w).state;
-          id(active_credit_kwh) = id(initial_credit_kwh).state;
-          auto now = id(sntp_time).now();
-          if (now.is_valid()) {
-            char buf[32];
-            snprintf(buf, sizeof(buf), "Spremljeno (%02d:%02d:%02d)", now.hour, now.minute, now.second);
-            id(params_status).publish_state(buf);
-          } else {
-            id(params_status).publish_state("Spremljeno i aktivno");
+
           }
 interval:
   - interval: 300ms
