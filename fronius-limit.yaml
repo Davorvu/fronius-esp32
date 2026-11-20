@@ -351,6 +351,7 @@ interval:
           }
           uint32_t raw_m = (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
           memcpy(&grid_w, &raw_m, sizeof(float));
+          if (std::isnan(grid_w) || grid_w > 50000.0 || grid_w < -50000.0) { ::lwip_close(sock); return; }
           id(grid_power_w).publish_state(grid_w);
           delay(150);
           // 2. Čitanje ukupne energije
@@ -433,6 +434,7 @@ interval:
           }
           uint32_t raw_i = (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
           memcpy(&pv_w, &raw_i, sizeof(float));
+          if (std::isnan(pv_w) || pv_w > 50000.0 || pv_w < -100.0) { ::lwip_close(sock); return; }
           id(pv_power_w).publish_state(pv_w);
 
           float house_w = pv_w + grid_w;
