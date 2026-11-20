@@ -467,7 +467,7 @@ interval:
           uint8_t hi = (uint8_t)(pct_scaled >> 8);
           uint8_t lo = (uint8_t)(pct_scaled & 0xFF);
           uint8_t w0=0x00, w1=0x03, w2=0x00, w3=0x00, w4=0x00, w5=0x11, w6=0x01, w7=0x10;
-          uint8_t w8=0x9D, w9=0x28, w10=0x00, w11=0x05, w12=0x0A;
+          uint8_t w8=0x9D, w9=0x32, w10=0x00, w11=0x05, w12=0x0A;
           uint8_t z=0x00, one=0x01;
           ::lwip_send(sock, &w0, 1, 0); ::lwip_send(sock, &w1, 1, 0); ::lwip_send(sock, &w2, 1, 0); ::lwip_send(sock, &w3, 1, 0);
           ::lwip_send(sock, &w4, 1, 0); ::lwip_send(sock, &w5, 1, 0); ::lwip_send(sock, &w6, 1, 0); ::lwip_send(sock, &w7, 1, 0);
