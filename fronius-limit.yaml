@@ -1,13 +1,19 @@
 esphome:
   name: fronius-limit
-  friendly_name: Fronius Limit Regulator
+  friendly_name: Fronius Export Limiter
+  on_boot:
+    priority: 600
+    then:
+      - lambda: |-
+          id(params_status).publish_state("Spremno");
 
 esp32:
   board: esp32dev
   framework:
     type: arduino
+
 logger:
-  level: INFO
+  level: ERROR
 ota:
   platform: esphome
 web_server:
@@ -76,14 +82,49 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
-
+ - id: active_max_w
+    type: float
+    restore_value: yes
+    initial_value: '3680.0'
+  - id: active_export_w
+    type: float
+    restore_value: yes
+    initial_value: '3680.0'
+  - id: active_margin_w
+    type: float
+    restore_value: yes
+    initial_value: '50.0'
+  - id: active_credit_kwh
+    type: float
+    restore_value: yes
+    initial_value: '0.0'
 text_sensor:
   - platform: template
     name: "Status sustava"
     id: modbus_status
     web_server:
       sorting_weight: 1
+  - platform: wifi_info
+    ip_address:
+      name: "IP adresa pločice"
+      web_server:
+        sorting_group_id: group_params
+        sorting_weight: 7
 
+  - platform: template
+    name: "Status postavki"
+    id: params_status
+    update_interval: never
+    web_server:
+      sorting_group_id: group_params
+      sorting_weight: 8
+
+  - platform: version
+    name: "Verzija softvera (SW)"
+    hide_timestamp: false
+    web_server:
+      sorting_group_id: group_params
+      sorting_weight: 9
 switch:
   - platform: template
     name: "A. Ručni limit izvoza"
@@ -251,7 +292,26 @@ number:
     web_server:
       sorting_group_id: group_params
       sorting_weight: 5
-
+ button:
+ - platform: template
+    name: "6. Spremi i primijeni postavke"
+    web_server:
+      sorting_group_id: group_params
+      sorting_weight: 6
+    on_press:
+      - lambda: |-
+          id(active_max_w) = id(inverter_max_w).state;
+          id(active_export_w) = id(max_export_w).state;
+          id(active_margin_w) = id(safety_margin_w).state;
+          id(active_credit_kwh) = id(initial_credit_kwh).state;
+          auto now = id(sntp_time).now();
+          if (now.is_valid()) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "Spremljeno (%02d:%02d:%02d)", now.hour, now.minute, now.second);
+            id(params_status).publish_state(buf);
+          } else {
+            id(params_status).publish_state("Spremljeno i aktivno");
+          }
 interval:
   - interval: 300ms
     then:
@@ -382,6 +442,7 @@ interval:
             if (now.is_valid()) {
               if (id(saved_month) != 0 && id(saved_month) != now.month) {
                 id(reset_requested) = true;
+                id(active_credit_kwh) = 0.0; 
                 auto call = id(initial_credit_kwh).make_call();
                 call.set_value(0.0);
                 call.perform();
@@ -400,7 +461,7 @@ interval:
           float m_exp = id(last_total_export_kwh) - id(base_export_kwh);
           if (m_imp < 0) m_imp = 0;
           if (m_exp < 0) m_exp = 0;
-          float balance_kwh = m_imp - m_exp + id(initial_credit_kwh).state;
+          float balance_kwh = m_imp - m_exp + id(active_credit_kwh);
 
           id(month_import_kwh).publish_state(m_imp);
           id(month_export_kwh).publish_state(m_exp);
@@ -436,10 +497,10 @@ interval:
           if (house_w < 0) house_w = 0;
           id(house_load_w).publish_state(house_w);
 
-          float max_w = id(inverter_max_w).state;
+          float max_w = id(active_max_w).state;
           if (max_w < 100.0) max_w = 4000.0;
-          float allowed_export = id(max_export_w).state;
-          float margin = id(safety_margin_w).state;
+          float allowed_export = id(active_export_w).state;
+          float margin = id(active_margin_w).state;
 
           float limit_pct = 100.0;
           if (id(manual_limit_switch).state) {
