@@ -109,6 +109,11 @@ text_sensor:
       web_server:
         sorting_group_id: group_params
         sorting_weight: 7
+    mac_address:
+      name: "MAC adresa pločice"
+      web_server:
+        sorting_group_id: group_params
+        sorting_weight: 8
 
   - platform: template
     name: "Status postavki"
@@ -116,14 +121,14 @@ text_sensor:
     update_interval: never
     web_server:
       sorting_group_id: group_params
-      sorting_weight: 8
+      sorting_weight: 9
 
   - platform: version
     name: "Verzija softvera (SW)"
     hide_timestamp: false
     web_server:
       sorting_group_id: group_params
-      sorting_weight: 9
+      sorting_weight: 10
 switch:
   - platform: template
     name: "A. Ručni limit izvoza"
