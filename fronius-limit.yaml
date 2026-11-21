@@ -206,7 +206,7 @@ sensor:
       sorting_weight: 2
 
   - platform: template
-    name: "Mjesečna bilanca (+kredit / -višak) (kWh)"
+    name: "Mjesečna bilanca (+preuzeto / -predano) (kWh)"
     id: month_balance_kwh
     unit_of_measurement: "kWh"
     accuracy_decimals: 1
@@ -250,7 +250,7 @@ text:
     mode: text
     optimistic: true
     restore_value: true
-    initial_value: "192.168.100.200"
+    initial_value: "0.0.0.0"
     web_server:
       sorting_group_id: group_params
       sorting_weight: 1
@@ -266,7 +266,7 @@ number:
     mode: box
     optimistic: true
     restore_value: true
-    initial_value: 3680
+    initial_value: 0
     web_server:
       sorting_group_id: group_params
       sorting_weight: 2
@@ -281,7 +281,7 @@ number:
     mode: box
     optimistic: true
     restore_value: true
-    initial_value: 3680
+    initial_value: 0
     web_server:
       sorting_group_id: group_params
       sorting_weight: 3
@@ -296,13 +296,13 @@ number:
     mode: box
     optimistic: true
     restore_value: true
-    initial_value: 50
+    initial_value: 0
     web_server:
       sorting_group_id: group_params
       sorting_weight: 4
 
   - platform: template
-    name: "5. Početni kredit mjeseca (kWh)"
+    name: "5. Početni saldo mjeseca (kWh)"
     id: initial_credit_kwh
     min_value: -5000
     max_value: 5000
