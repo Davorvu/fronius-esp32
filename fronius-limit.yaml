@@ -2,15 +2,13 @@ esphome:
   name: fronius-limit
   friendly_name: Fronius Export Limiter
   libraries:
-    - FS
-    - WebServer
-    - HTTPClient
+    - Network
     - WiFiClientSecure
+    - HTTPClient
   includes:
     - <WiFi.h>
     - <HTTPClient.h>
     - <WiFiClientSecure.h>
-    - <WebServer.h>
   on_boot:
     priority: 600
     then:
@@ -134,9 +132,11 @@ globals:
   - id: cropex_today
     type: float[24]
     restore_value: no
+    initial_value: '{-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999}'
   - id: cropex_tomorrow
     type: float[24]
     restore_value: no
+    initial_value: '{-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999}'
   - id: graf_server_started
     type: bool
     restore_value: no
@@ -485,19 +485,44 @@ interval:
   - interval: 100ms
     then:
       - lambda: |-
-          static WebServer graf_srv(8080);
+          static WiFiServer graf_srv(8080);
           if (id(my_wifi).is_connected()) {
             if (!id(graf_server_started)) {
-              graf_srv.on("/", HTTP_GET, [&]() {
-                String html = F("<!DOCTYPE html><html lang='hr'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Solarni nadzor</title>"
+              graf_srv.begin();
+              id(graf_server_started) = true;
+              char u[48];
+              snprintf(u, sizeof(u), "http://%s:8080", id(my_wifi).get_ip_address().str().c_str());
+              id(graf_url_info).publish_state(u);
+            }
+            WiFiClient cl = graf_srv.available();
+            if (cl) {
+              String req = cl.readStringUntil('\r');
+              cl.flush();
+              if (req.indexOf("GET /data") >= 0) {
+                char json[256];
+                snprintf(json, sizeof(json),
+                  "{\"pv\":%.1f,\"house\":%.1f,\"grid\":%.1f,\"lim\":%.1f,\"bal\":%.1f,\"crp\":%.2f,\"st\":\"%s\"}",
+                  id(pv_power_w).state, id(house_load_w).state, id(grid_power_w).state,
+                  id(applied_limit_pct).state, id(month_balance_kwh).state,
+                  id(current_cropex_price).state, id(modbus_status).state.c_str());
+                cl.println("HTTP/1.1 200 OK");
+                cl.println("Content-Type: application/json");
+                cl.println("Connection: close");
+                cl.println();
+                cl.print(json);
+              } else {
+                cl.println("HTTP/1.1 200 OK");
+                cl.println("Content-Type: text/html; charset=UTF-8");
+                cl.println("Connection: close");
+                cl.println();
+                cl.print(F("<!DOCTYPE html><html lang='hr'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Solarni nadzor</title>"
                 "<style>body{margin:0;background:#0f172a;color:#f8fafc;font-family:system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;padding:16px}"
                 "h2{margin:6px 0 14px;font-size:20px;font-weight:600;color:#e2e8f0}.box{width:100%;max-width:440px;background:#1e293b;border-radius:16px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,.4)}"
                 ".cards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.card{background:#0f172a;border-radius:10px;padding:10px 6px;text-align:center}"
                 ".lbl{font-size:11px;color:#94a3b8;margin-bottom:4px}.val{font-size:15px;font-weight:700}"
                 ".btn{display:block;width:100%;margin-top:14px;padding:12px;background:#334155;color:#fff;text-align:center;text-decoration:none;border-radius:10px;font-weight:600;font-size:14px}"
                 ".mode{text-align:center;margin-top:10px;font-size:13px;color:#38bdf8;font-weight:600}"
-                "@keyframes flow{to{stroke-dashoffset:-24}}.anim{stroke-dasharray:6 6;animation:flow 1s linear infinite}"
-                "@keyframes rev{to{stroke-dashoffset:24}}.anim-rev{stroke-dasharray:6 6;animation:rev 1s linear infinite}</style></head><body>"
+                "@keyframes flow{to{stroke-dashoffset:-24}}.anim{stroke-dasharray:6 6;animation:flow 1s linear infinite}</style></head><body>"
                 "<h2>Solarni sustav – tokovi energije</h2><div class='box'>"
                 "<svg viewBox='0 0 360 250' width='100%'>"
                 "<line id='l_pv_h' x1='180' y1='58' x2='75' y2='175' stroke='#334155' stroke-width='4' stroke-linecap='round'/>"
@@ -535,25 +560,11 @@ interval:
                 "lgh.setAttribute('stroke','#ef4444');lgh.classList.add('anim');lpvg.setAttribute('stroke','#334155');lpvg.classList.remove('anim');}"
                 "else{cg.setAttribute('stroke','#64748b');tgl.setAttribute('fill','#94a3b8');tgl.textContent='MREŽA';tg.textContent='0 W';"
                 "lpvg.setAttribute('stroke','#334155');lpvg.classList.remove('anim');lgh.setAttribute('stroke','#334155');lgh.classList.remove('anim');}"
-                "}).catch(()=>{});}upd();setInterval(upd,3000);</script></body></html>");
-                graf_srv.send(200, "text/html", html);
-              });
-              graf_srv.on("/data", HTTP_GET, [&]() {
-                char json[256];
-                snprintf(json, sizeof(json),
-                  "{\"pv\":%.1f,\"house\":%.1f,\"grid\":%.1f,\"lim\":%.1f,\"bal\":%.1f,\"crp\":%.2f,\"st\":\"%s\"}",
-                  id(pv_power_w).state, id(house_load_w).state, id(grid_power_w).state,
-                  id(applied_limit_pct).state, id(month_balance_kwh).state,
-                  id(current_cropex_price).state, id(modbus_status).state.c_str());
-                graf_srv.send(200, "application/json", json);
-              });
-              graf_srv.begin();
-              id(graf_server_started) = true;
-              char u[48];
-              snprintf(u, sizeof(u), "http://%s:8080", id(my_wifi).get_ip_address().str().c_str());
-              id(graf_url_info).publish_state(u);
+                "}).catch(()=>{});}upd();setInterval(upd,3000);</script></body></html>"));
+              }
+              delay(1);
+              cl.stop();
             }
-            graf_srv.handleClient();
           }
   - interval: 6s
     then:
