@@ -2,7 +2,7 @@ esphome:
   name: fronius-limit
   friendly_name: Fronius Export Limiter
   libraries:
-    - Network
+    - WiFi
     - WiFiClientSecure
     - HTTPClient
   includes:
