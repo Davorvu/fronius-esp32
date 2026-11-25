@@ -1,6 +1,10 @@
 esphome:
   name: fronius-limit
   friendly_name: Fronius Export Limiter
+  libraries:
+    - WebServer
+    - HTTPClient
+    - WiFiClientSecure
   includes:
     - <WiFi.h>
     - <HTTPClient.h>
@@ -17,10 +21,6 @@ esp32:
   board: esp32dev
   framework:
     type: arduino
-  libraries:
-    - WebServer
-    - HTTPClient
-    - WiFiClientSecure
 
 logger:
   level: ERROR
