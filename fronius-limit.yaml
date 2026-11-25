@@ -17,6 +17,10 @@ esp32:
   board: esp32dev
   framework:
     type: arduino
+  libraries:
+    - WebServer
+    - HTTPClient
+    - WiFiClientSecure
 
 logger:
   level: ERROR
