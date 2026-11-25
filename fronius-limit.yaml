@@ -6,14 +6,11 @@ esphome:
     then:
       - lambda: |-
           id(params_status).publish_state("Spremno");
-          bool has_today = false;
-          for (int i = 0; i < 24; i++) {
-            if (id(cropex_today)[i] > -900.0) { has_today = true; break; }
-          }
+          bool has_today = (id(cropex_today)[0] > -900.0);
           if (has_today) {
-            id(cropex_status).publish_state("OK: Učitano iz memorije");
+            id(cropex_status).publish_state("Učitano iz memorije");
           } else {
-            id(cropex_status).publish_state("Čeka 23:00h / ručni dohvat");
+            id(cropex_status).publish_state("Čeka dohvat cijena...");
           }
       - delay: 20s
       - script.execute: fetch_cropex_prices
@@ -57,7 +54,7 @@ improv_serial:
 
 http_request:
   verify_ssl: false
-  timeout: 10s
+  timeout: 12s
 
 time:
   - platform: sntp
@@ -74,7 +71,7 @@ time:
         hours: 23
         then:
           - lambda: |-
-              if (id(cropex_tomorrow)[12] <= -900.0) {
+              if (id(cropex_tomorrow)[0] <= -900.0) {
                 id(fetch_cropex_prices).execute();
               }
       - seconds: 0
@@ -82,20 +79,18 @@ time:
         hours: 0
         then:
           - lambda: |-
-              bool has_tmrw = false;
-              for (int i = 0; i < 24; i++) {
-                if (id(cropex_tomorrow)[i] > -900.0) { has_tmrw = true; break; }
-              }
-              if (has_tmrw) {
+              if (id(cropex_tomorrow)[0] > -900.0) {
                 for (int i = 0; i < 24; i++) {
                   id(cropex_today)[i] = id(cropex_tomorrow)[i];
                   id(cropex_tomorrow)[i] = -9999.0;
                 }
                 id(cropex_status).publish_state("Prebačeno na današnji dan");
+              } else {
+                id(cropex_status).publish_state("Čekam osvježavanje...");
               }
       - seconds: 0
         minutes: 5
-        hours: 0
+        hours: 0,6,12,18
         then:
           - lambda: |-
               auto now = id(sntp_time).now();
@@ -169,10 +164,10 @@ globals:
     type: float[24]
     restore_value: yes
     initial_value: '{-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999}'
-  - id: graf_server_started
-    type: bool
+  - id: graf_listen_fd
+    type: int
     restore_value: no
-    initial_value: 'false'
+    initial_value: '-1'
 
 text_sensor:
   - platform: template
@@ -191,10 +186,10 @@ text_sensor:
   - platform: template
     name: "Grafički prikaz"
     id: graf_url_info
-    entity_category: ""
+    update_interval: never
     web_server:
       sorting_group_id: group_mode
-      sorting_weight: 6
+      sorting_weight: 3
   - platform: template
     name: "Status CROPEX tablice"
     id: cropex_status
@@ -236,7 +231,7 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     web_server:
       sorting_group_id: group_mode
-      sorting_weight: 3
+      sorting_weight: 4
     on_turn_on:
       - switch.turn_off: auto_balance_switch
       - switch.turn_off: cropex_limit_switch
@@ -247,7 +242,7 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     web_server:
       sorting_group_id: group_mode
-      sorting_weight: 4
+      sorting_weight: 5
     on_turn_on:
       - switch.turn_off: manual_limit_switch
       - switch.turn_off: cropex_limit_switch
@@ -258,7 +253,7 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     web_server:
       sorting_group_id: group_mode
-      sorting_weight: 5
+      sorting_weight: 6
     on_turn_on:
       - switch.turn_off: manual_limit_switch
       - switch.turn_off: auto_balance_switch
@@ -344,7 +339,7 @@ button:
           id(active_min_price) = id(min_export_price).state;
           auto now = id(sntp_time).now();
           if (now.is_valid()) {
-            char buf[40];
+            char buf[48];
             snprintf(buf, sizeof(buf), "Spremljeno (%02d:%02d:%02d)", now.hour, now.minute, now.second);
             id(params_status).publish_state(buf);
           } else {
@@ -476,8 +471,8 @@ script:
                       while (pos < arr.length() && n < 192) {
                         size_t comma = arr.find(',', pos);
                         std::string tok = (comma == std::string::npos) ? arr.substr(pos) : arr.substr(pos, comma - pos);
-                        while (!tok.empty() && (tok[0] == ' ' || tok[0] == '\n' || tok[0] == '\r')) tok.erase(0, 1);
-                        while (!tok.empty() && (tok.back() == ' ' || tok.back() == '\n' || tok.back() == '\r')) tok.pop_back();
+                        size_t f = tok.find_first_not_of(" \t\r\n");
+                        if (f != std::string::npos) tok = tok.substr(f);
                         if (tok != "null" && !tok.empty()) {
                           vals[n++] = atof(tok.c_str());
                         }
@@ -489,15 +484,20 @@ script:
                         int hours_avail = n / step;
                         int today_count = (hours_avail >= 24) ? 24 : hours_avail;
                         for (int h = 0; h < today_count; h++) {
-                          float sum = 0;
-                          for (int q = 0; q < step; q++) sum += vals[h * step + q];
-                          id(cropex_today)[h] = sum / (float)step;
+                          if (step == 4) {
+                            id(cropex_today)[h] = (vals[h*4] + vals[h*4+1] + vals[h*4+2] + vals[h*4+3]) / 4.0f;
+                          } else {
+                            id(cropex_today)[h] = vals[h];
+                          }
                         }
                         if (hours_avail >= 48) {
                           for (int h = 0; h < 24; h++) {
-                            float sum = 0;
-                            for (int q = 0; q < step; q++) sum += vals[(24 + h) * step + q];
-                            id(cropex_tomorrow)[h] = sum / (float)step;
+                            int idx = (24 + h) * step;
+                            if (step == 4) {
+                              id(cropex_tomorrow)[h] = (vals[idx] + vals[idx+1] + vals[idx+2] + vals[idx+3]) / 4.0f;
+                            } else {
+                              id(cropex_tomorrow)[h] = vals[idx];
+                            }
                           }
                           id(cropex_status).publish_state("OK: Učitano danas + sutra (48h)");
                         } else {
@@ -510,7 +510,7 @@ script:
                       id(cropex_status).publish_state("Greška: Nema polja cijena");
                     }
                   } else {
-                    char err[32];
+                    char err[48];
                     snprintf(err, sizeof(err), "HTTP greška: %d", response->status_code);
                     id(cropex_status).publish_state(err);
                   }
@@ -530,122 +530,121 @@ interval:
             if (id(led_blink_state)) id(blue_led).turn_on();
             else id(blue_led).turn_off();
           }
-  - interval: 80ms
+  - interval: 100ms
     then:
       - lambda: |-
-          static int srv_sock = -1;
-          if (id(my_wifi).is_connected()) {
-            if (srv_sock < 0) {
-              srv_sock = ::lwip_socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
-              if (srv_sock >= 0) {
-                int opt = 1;
-                ::lwip_setsockopt(srv_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-                int fl = ::lwip_fcntl(srv_sock, F_GETFL, 0);
-                ::lwip_fcntl(srv_sock, F_SETFL, fl | O_NONBLOCK);
-                struct sockaddr_in addr;
-                addr.sin_family = AF_INET;
-                addr.sin_port = htons(8080);
-                addr.sin_addr.s_addr = INADDR_ANY;
-                if (::lwip_bind(srv_sock, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
-                  ::lwip_listen(srv_sock, 2);
+          if (!id(my_wifi).is_connected()) return;
+          if (id(graf_listen_fd) < 0) {
+            int s = ::lwip_socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+            if (s >= 0) {
+              int opt = 1;
+              ::lwip_setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+              struct sockaddr_in addr;
+              memset(&addr, 0, sizeof(addr));
+              addr.sin_family = AF_INET;
+              addr.sin_port = htons(8080);
+              addr.sin_addr.s_addr = INADDR_ANY;
+              if (::lwip_bind(s, (struct sockaddr *)&addr, sizeof(addr)) == 0 && ::lwip_listen(s, 2) == 0) {
+                int fl = ::lwip_fcntl(s, F_GETFL, 0);
+                ::lwip_fcntl(s, F_SETFL, fl | O_NONBLOCK);
+                id(graf_listen_fd) = s;
+                if (id(ip_addr_sensor).has_state() && id(ip_addr_sensor).state.length() > 6) {
+                  char u[64];
+                  snprintf(u, sizeof(u), "http://%s:8080", id(ip_addr_sensor).state.c_str());
+                  id(graf_url_info).publish_state(u);
+                }
+              } else {
+                ::lwip_close(s);
+              }
+            }
+          }
+          if (id(graf_listen_fd) >= 0) {
+            struct sockaddr_in caddr;
+            socklen_t clen = sizeof(caddr);
+            int cfd = ::lwip_accept(id(graf_listen_fd), (struct sockaddr *)&caddr, &clen);
+            if (cfd >= 0) {
+              struct timeval tv;
+              tv.tv_sec = 0;
+              tv.tv_usec = 300000;
+              ::lwip_setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+              char req[256];
+              int r = ::lwip_recv(cfd, req, sizeof(req) - 1, 0);
+              if (r > 0) {
+                req[r] = 0;
+                if (strstr(req, "GET /data") != NULL) {
+                  float v_pv = std::isnan(id(pv_power_w).state) ? 0.0f : id(pv_power_w).state;
+                  float v_hs = std::isnan(id(house_load_w).state) ? 0.0f : id(house_load_w).state;
+                  float v_gr = std::isnan(id(grid_power_w).state) ? 0.0f : id(grid_power_w).state;
+                  float v_lm = std::isnan(id(applied_limit_pct).state) ? 100.0f : id(applied_limit_pct).state;
+                  float v_bl = std::isnan(id(month_balance_kwh).state) ? 0.0f : id(month_balance_kwh).state;
+                  float v_cr = std::isnan(id(current_cropex_price).state) ? -999.0f : id(current_cropex_price).state;
+                  const char* st_str = id(modbus_status).has_state() ? id(modbus_status).state.c_str() : "Spremno";
+                  char body[320];
+                  int blen = snprintf(body, sizeof(body),
+                    "{\"pv\":%.1f,\"house\":%.1f,\"grid\":%.1f,\"lim\":%.1f,\"bal\":%.1f,\"crp\":%.2f,\"st\":\"%s\"}",
+                    v_pv, v_hs, v_gr, v_lm, v_bl, v_cr, st_str);
+                  char hdr[160];
+                  int hlen = snprintf(hdr, sizeof(hdr),
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n", blen);
+                  ::lwip_send(cfd, hdr, hlen, 0);
+                  ::lwip_send(cfd, body, blen, 0);
                 } else {
-                  ::lwip_close(srv_sock);
-                  srv_sock = -1;
+                  static const char page[] =
+                    "<!DOCTYPE html><html lang='hr'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Solarni nadzor</title>"
+                    "<style>body{margin:0;background:#0f172a;color:#f8fafc;font-family:system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;padding:16px}"
+                    "h2{margin:6px 0 14px;font-size:20px;font-weight:600;color:#e2e8f0}.box{width:100%;max-width:440px;background:#1e293b;border-radius:16px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,.4)}"
+                    ".cards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.card{background:#0f172a;border-radius:10px;padding:10px 6px;text-align:center}"
+                    ".lbl{font-size:11px;color:#94a3b8;margin-bottom:4px}.val{font-size:15px;font-weight:700}"
+                    ".btn{display:block;width:100%;box-sizing:border-box;margin-top:14px;padding:12px;background:#334155;color:#fff;text-align:center;text-decoration:none;border-radius:10px;font-weight:600;font-size:14px}"
+                    ".mode{text-align:center;margin-top:10px;font-size:13px;color:#38bdf8;font-weight:600}"
+                    "@keyframes flow{to{stroke-dashoffset:-24}}.anim{stroke-dasharray:6 6;animation:flow 1s linear infinite}</style></head><body>"
+                    "<h2>Solarni sustav – tokovi energije</h2><div class='box'>"
+                    "<svg viewBox='0 0 360 250' width='100%'>"
+                    "<line id='l_pv_h' x1='180' y1='58' x2='75' y2='175' stroke='#334155' stroke-width='4' stroke-linecap='round'/>"
+                    "<line id='l_pv_g' x1='180' y1='58' x2='285' y2='175' stroke='#334155' stroke-width='4' stroke-linecap='round'/>"
+                    "<line id='l_g_h' x1='260' y1='195' x2='100' y2='195' stroke='#334155' stroke-width='4' stroke-linecap='round'/>"
+                    "<circle id='c_pv' cx='180' cy='45' r='30' fill='#0f172a' stroke='#eab308' stroke-width='3'/>"
+                    "<text x='180' y='41' text-anchor='middle' fill='#eab308' font-size='11' font-weight='bold'>PANELI</text>"
+                    "<text id='t_pv' x='180' y='56' text-anchor='middle' fill='#fff' font-size='12' font-weight='bold'>0 W</text>"
+                    "<circle cx='70' cy='195' r='30' fill='#0f172a' stroke='#3b82f6' stroke-width='3'/>"
+                    "<text x='70' y='191' text-anchor='middle' fill='#60a5fa' font-size='11' font-weight='bold'>KUĆA</text>"
+                    "<text id='t_h' x='70' y='206' text-anchor='middle' fill='#fff' font-size='12' font-weight='bold'>0 W</text>"
+                    "<circle id='c_g' cx='290' cy='195' r='30' fill='#0f172a' stroke='#22c55e' stroke-width='3'/>"
+                    "<text id='t_gl' x='290' y='191' text-anchor='middle' fill='#4ade80' font-size='10' font-weight='bold'>MREŽA</text>"
+                    "<text id='t_g' x='290' y='206' text-anchor='middle' fill='#fff' font-size='12' font-weight='bold'>0 W</text>"
+                    "</svg>"
+                    "<div class='mode' id='m_txt'>Učitavanje...</div>"
+                    "<div class='cards'>"
+                    "<div class='card'><div class='lbl'>Limit inv.</div><div class='val' id='v_lim'>-- %</div></div>"
+                    "<div class='card'><div class='lbl'>Bilanca mj.</div><div class='val' id='v_bal'>-- kWh</div></div>"
+                    "<div class='card'><div class='lbl'>CROPEX</div><div class='val' id='v_crp'>-- €</div></div>"
+                    "</div><a class='btn' id='lnk_set' href='#'>Postavke i parametri</a></div>"
+                    "<script>document.getElementById('lnk_set').href='http://'+location.hostname+':80';"
+                    "function upd(){fetch('/data').then(r=>r.json()).then(d=>{"
+                    "document.getElementById('t_pv').textContent=Math.round(d.pv)+' W';"
+                    "document.getElementById('t_h').textContent=Math.round(d.house)+' W';"
+                    "document.getElementById('v_lim').textContent=d.lim.toFixed(1)+' %';"
+                    "document.getElementById('v_bal').textContent=d.bal.toFixed(1)+' kWh';"
+                    "document.getElementById('v_crp').textContent=(d.crp>-900?d.crp.toFixed(1)+' €':'--');"
+                    "document.getElementById('m_txt').textContent=d.st;"
+                    "let lpvh=document.getElementById('l_pv_h'),lpvg=document.getElementById('l_pv_g'),lgh=document.getElementById('l_g_h'),cg=document.getElementById('c_g'),tgl=document.getElementById('t_gl'),tg=document.getElementById('t_g');"
+                    "if(d.pv>20){lpvh.setAttribute('stroke','#eab308');lpvh.classList.add('anim');}else{lpvh.setAttribute('stroke','#334155');lpvh.classList.remove('anim');}"
+                    "if(d.grid<-15){cg.setAttribute('stroke','#22c55e');tgl.setAttribute('fill','#4ade80');tgl.textContent='IZVOZ';tg.textContent=Math.round(-d.grid)+' W';"
+                    "lpvg.setAttribute('stroke','#22c55e');lpvg.classList.add('anim');lgh.setAttribute('stroke','#334155');lgh.classList.remove('anim');}"
+                    "else if(d.grid>15){cg.setAttribute('stroke','#ef4444');tgl.setAttribute('fill','#f87171');tgl.textContent='UVOZ';tg.textContent=Math.round(d.grid)+' W';"
+                    "lgh.setAttribute('stroke','#ef4444');lgh.classList.add('anim');lpvg.setAttribute('stroke','#334155');lpvg.classList.remove('anim');}"
+                    "else{cg.setAttribute('stroke','#64748b');tgl.setAttribute('fill','#94a3b8');tgl.textContent='MREŽA';tg.textContent='0 W';"
+                    "lpvg.setAttribute('stroke','#334155');lpvg.classList.remove('anim');lgh.setAttribute('stroke','#334155');lgh.classList.remove('anim');}"
+                    "}).catch(()=>{});}upd();setInterval(upd,3000);</script></body></html>";
+                  int plen = sizeof(page) - 1;
+                  char hdr[160];
+                  int hlen = snprintf(hdr, sizeof(hdr),
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: %d\r\nConnection: close\r\n\r\n", plen);
+                  ::lwip_send(cfd, hdr, hlen, 0);
+                  ::lwip_send(cfd, page, plen, 0);
                 }
               }
-            }
-            if (!id(graf_server_started) && id(ip_addr_sensor).has_state() && id(ip_addr_sensor).state.length() > 6) {
-              char u[64];
-              snprintf(u, sizeof(u), "http://%s:8080", id(ip_addr_sensor).state.c_str());
-              id(graf_url_info).publish_state(u);
-              id(graf_server_started) = true;
-            }
-            if (srv_sock >= 0) {
-              struct sockaddr_in cl_addr;
-              socklen_t cl_len = sizeof(cl_addr);
-              int cl = ::lwip_accept(srv_sock, (struct sockaddr *)&cl_addr, &cl_len);
-              if (cl >= 0) {
-                struct timeval tv;
-                tv.tv_sec = 0;
-                tv.tv_usec = 300000;
-                ::lwip_setsockopt(cl, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-                char req[256] = {0};
-                int r = ::lwip_recv(cl, req, sizeof(req) - 1, 0);
-                if (r > 0) {
-                  if (strstr(req, "GET /data") != NULL) {
-                    float pv = std::isnan(id(pv_power_w).state) ? 0.0f : id(pv_power_w).state;
-                    float hs = std::isnan(id(house_load_w).state) ? 0.0f : id(house_load_w).state;
-                    float gr = std::isnan(id(grid_power_w).state) ? 0.0f : id(grid_power_w).state;
-                    float lm = std::isnan(id(applied_limit_pct).state) ? 100.0f : id(applied_limit_pct).state;
-                    float bl = std::isnan(id(month_balance_kwh).state) ? 0.0f : id(month_balance_kwh).state;
-                    float cp = std::isnan(id(current_cropex_price).state) ? -999.0f : id(current_cropex_price).state;
-                    const char* st = id(modbus_status).has_state() ? id(modbus_status).state.c_str() : "Spremno";
-                    char json[256];
-                    int jlen = snprintf(json, sizeof(json),
-                      "{\"pv\":%.1f,\"house\":%.1f,\"grid\":%.1f,\"lim\":%.1f,\"bal\":%.1f,\"crp\":%.2f,\"st\":\"%s\"}",
-                      pv, hs, gr, lm, bl, cp, st);
-                    char hdr[160];
-                    int hlen = snprintf(hdr, sizeof(hdr),
-                      "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n", jlen);
-                    ::lwip_send(cl, hdr, hlen, 0);
-                    ::lwip_send(cl, json, jlen, 0);
-                  } else {
-                    static const char page[] =
-                      "<!DOCTYPE html><html lang='hr'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Solarni nadzor</title>"
-                      "<style>body{margin:0;background:#0f172a;color:#f8fafc;font-family:system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;padding:16px}"
-                      "h2{margin:6px 0 14px;font-size:20px;font-weight:600;color:#e2e8f0}.box{width:100%;max-width:440px;background:#1e293b;border-radius:16px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,.4)}"
-                      ".cards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.card{background:#0f172a;border-radius:10px;padding:10px 6px;text-align:center}"
-                      ".lbl{font-size:11px;color:#94a3b8;margin-bottom:4px}.val{font-size:15px;font-weight:700}"
-                      ".btn{display:block;width:100%;box-sizing:border-box;margin-top:14px;padding:12px;background:#334155;color:#fff;text-align:center;text-decoration:none;border-radius:10px;font-weight:600;font-size:14px}"
-                      ".mode{text-align:center;margin-top:10px;font-size:13px;color:#38bdf8;font-weight:600}"
-                      "@keyframes flow{to{stroke-dashoffset:-24}}.anim{stroke-dasharray:6 6;animation:flow 1s linear infinite}</style></head><body>"
-                      "<h2>Solarni sustav – tokovi energije</h2><div class='box'>"
-                      "<svg viewBox='0 0 360 250' width='100%'>"
-                      "<line id='l_pv_h' x1='180' y1='58' x2='75' y2='175' stroke='#334155' stroke-width='4' stroke-linecap='round'/>"
-                      "<line id='l_pv_g' x1='180' y1='58' x2='285' y2='175' stroke='#334155' stroke-width='4' stroke-linecap='round'/>"
-                      "<line id='l_g_h' x1='260' y1='195' x2='100' y2='195' stroke='#334155' stroke-width='4' stroke-linecap='round'/>"
-                      "<circle id='c_pv' cx='180' cy='45' r='30' fill='#0f172a' stroke='#eab308' stroke-width='3'/>"
-                      "<text x='180' y='41' text-anchor='middle' fill='#eab308' font-size='11' font-weight='bold'>PANELI</text>"
-                      "<text id='t_pv' x='180' y='56' text-anchor='middle' fill='#fff' font-size='12' font-weight='bold'>0 W</text>"
-                      "<circle cx='70' cy='195' r='30' fill='#0f172a' stroke='#3b82f6' stroke-width='3'/>"
-                      "<text x='70' y='191' text-anchor='middle' fill='#60a5fa' font-size='11' font-weight='bold'>KUĆA</text>"
-                      "<text id='t_h' x='70' y='206' text-anchor='middle' fill='#fff' font-size='12' font-weight='bold'>0 W</text>"
-                      "<circle id='c_g' cx='290' cy='195' r='30' fill='#0f172a' stroke='#22c55e' stroke-width='3'/>"
-                      "<text id='t_gl' x='290' y='191' text-anchor='middle' fill='#4ade80' font-size='10' font-weight='bold'>MREŽA</text>"
-                      "<text id='t_g' x='290' y='206' text-anchor='middle' fill='#fff' font-size='12' font-weight='bold'>0 W</text>"
-                      "</svg>"
-                      "<div class='mode' id='m_txt'>Učitavanje...</div>"
-                      "<div class='cards'>"
-                      "<div class='card'><div class='lbl'>Limit inv.</div><div class='val' id='v_lim'>-- %</div></div>"
-                      "<div class='card'><div class='lbl'>Bilanca mj.</div><div class='val' id='v_bal'>-- kWh</div></div>"
-                      "<div class='card'><div class='lbl'>CROPEX</div><div class='val' id='v_crp'>-- €</div></div>"
-                      "</div><a class='btn' id='lnk_set' href='#'>Postavke i parametri</a></div>"
-                      "<script>document.getElementById('lnk_set').href='http://'+location.hostname+':80';"
-                      "function upd(){fetch('/data').then(r=>r.json()).then(d=>{"
-                      "document.getElementById('t_pv').textContent=Math.round(d.pv)+' W';"
-                      "document.getElementById('t_h').textContent=Math.round(d.house)+' W';"
-                      "document.getElementById('v_lim').textContent=d.lim.toFixed(1)+' %';"
-                      "document.getElementById('v_bal').textContent=d.bal.toFixed(1)+' kWh';"
-                      "document.getElementById('v_crp').textContent=(d.crp>-900?d.crp.toFixed(1)+' €':'--');"
-                      "document.getElementById('m_txt').textContent=d.st;"
-                      "let lpvh=document.getElementById('l_pv_h'),lpvg=document.getElementById('l_pv_g'),lgh=document.getElementById('l_g_h'),cg=document.getElementById('c_g'),tgl=document.getElementById('t_gl'),tg=document.getElementById('t_g');"
-                      "if(d.pv>20){lpvh.setAttribute('stroke','#eab308');lpvh.classList.add('anim');}else{lpvh.setAttribute('stroke','#334155');lpvh.classList.remove('anim');}"
-                      "if(d.grid<-15){cg.setAttribute('stroke','#22c55e');tgl.setAttribute('fill','#4ade80');tgl.textContent='IZVOZ';tg.textContent=Math.round(-d.grid)+' W';"
-                      "lpvg.setAttribute('stroke','#22c55e');lpvg.classList.add('anim');lgh.setAttribute('stroke','#334155');lgh.classList.remove('anim');}"
-                      "else if(d.grid>15){cg.setAttribute('stroke','#ef4444');tgl.setAttribute('fill','#f87171');tgl.textContent='UVOZ';tg.textContent=Math.round(d.grid)+' W';"
-                      "lgh.setAttribute('stroke','#ef4444');lgh.classList.add('anim');lpvg.setAttribute('stroke','#334155');lpvg.classList.remove('anim');}"
-                      "else{cg.setAttribute('stroke','#64748b');tgl.setAttribute('fill','#94a3b8');tgl.textContent='MREŽA';tg.textContent='0 W';"
-                      "lpvg.setAttribute('stroke','#334155');lpvg.classList.remove('anim');lgh.setAttribute('stroke','#334155');lgh.classList.remove('anim');}"
-                      "}).catch(()=>{});}upd();setInterval(upd,3000);</script></body></html>";
-                    char hdr[160];
-                    int hlen = snprintf(hdr, sizeof(hdr),
-                      "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: %d\r\nConnection: close\r\n\r\n", (int)sizeof(page) - 1);
-                    ::lwip_send(cl, hdr, hlen, 0);
-                    ::lwip_send(cl, page, sizeof(page) - 1, 0);
-                  }
-                }
-                ::lwip_close(cl);
-              }
+              ::lwip_close(cfd);
             }
           }
   - interval: 6s
@@ -656,6 +655,22 @@ interval:
             id(modbus_status).publish_state("Nema Wi-Fi veze");
             return;
           }
+          if (id(ip_addr_sensor).has_state() && id(ip_addr_sensor).state.length() > 6 && !id(graf_url_info).has_state()) {
+            char u[64];
+            snprintf(u, sizeof(u), "http://%s:8080", id(ip_addr_sensor).state.c_str());
+            id(graf_url_info).publish_state(u);
+          }
+          auto now = id(sntp_time).now();
+          float crp_now = -9999.0f;
+          if (now.is_valid() && now.hour >= 0 && now.hour < 24) {
+            crp_now = id(cropex_today)[now.hour];
+          }
+          if (crp_now > -900.0f) {
+            id(current_cropex_price).publish_state(crp_now);
+          } else {
+            id(current_cropex_price).publish_state(NAN);
+          }
+
           int sock = ::lwip_socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
           if (sock < 0) {
             id(comm_ok) = false;
@@ -748,7 +763,6 @@ interval:
             if (count == 28) imp_b4 = b;
             count++;
           }
-          auto now = id(sntp_time).now();
           if (count == 41) {
             uint32_t raw_exp = (exp_b1 << 24) | (exp_b2 << 16) | (exp_b3 << 8) | exp_b4;
             uint32_t raw_imp = (imp_b1 << 24) | (imp_b2 << 16) | (imp_b3 << 8) | imp_b4;
@@ -813,7 +827,6 @@ interval:
           if (house_w < 0) house_w = 0;
           id(house_load_w).publish_state(house_w);
 
-          // Vizualni tok energije na vrhu stranice
           char flow_buf[96];
           const char* sun_icon = (pv_w > 20.0) ? "☀️" : "🌙";
           if (grid_w < -15.0) {
@@ -824,17 +837,6 @@ interval:
             snprintf(flow_buf, sizeof(flow_buf), "%s %.0f W  ➔  🏠 %.0f W  ⚖️  ⚡ 0 W (Balans)", sun_icon, pv_w, house_w);
           }
           id(energy_flow_visual).publish_state(flow_buf);
-
-          // Ažuriranje trenutne CROPEX cijene za tekući sat
-          float crp_now = -9999.0;
-          if (now.is_valid() && now.hour >= 0 && now.hour < 24) {
-            crp_now = id(cropex_today)[now.hour];
-          }
-          if (crp_now > -900.0) {
-            id(current_cropex_price).publish_state(crp_now);
-          } else {
-            id(current_cropex_price).publish_state(NAN);
-          }
 
           // 4. Izračun ciljanog limita invertera po odabranom režimu
           float max_w = id(active_max_w);
@@ -856,13 +858,13 @@ interval:
             if (balance_kwh > 1.0) id(modbus_status).publish_state("Aktivan: Auto balans (Izvoz OK)");
             else id(modbus_status).publish_state("Aktivan: Auto balans (0 W limit)");
           } else if (id(cropex_limit_switch).state) {
-            bool price_ok = (crp_now > -900.0 && crp_now >= id(active_min_price));
+            bool price_ok = (crp_now > -900.0f && crp_now >= id(active_min_price));
             float effective_export = price_ok ? allowed_export : 0.0;
             float target_w = house_w + effective_export - margin;
             if (target_w < 0.0) target_w = 0.0;
             limit_pct = (target_w / max_w) * 100.0;
             if (price_ok) id(modbus_status).publish_state("Aktivan: CROPEX (Izvoz OK)");
-            else if (crp_now <= -900.0) id(modbus_status).publish_state("Aktivan: CROPEX (Nema cijene -> 0 W)");
+            else if (crp_now <= -900.0f) id(modbus_status).publish_state("Aktivan: CROPEX (Nema cijene -> 0 W)");
             else id(modbus_status).publish_state("Aktivan: CROPEX (Niska cijena -> 0 W)");
           } else {
             limit_pct = 100.0;
