@@ -23,6 +23,9 @@ web_server:
   port: 80
   version: 3
   sorting_groups:
+    - id: group_mode
+      name: "0. Upravljanje i režim rada"
+      sorting_weight: 5
     - id: group_live
       name: "1. Live mjerenja"
       sorting_weight: 10
@@ -138,11 +141,13 @@ text_sensor:
     id: energy_flow_visual
     update_interval: never
     web_server:
+      sorting_group_id: group_mode
       sorting_weight: 1
   - platform: template
     name: "Status sustava"
     id: modbus_status
     web_server:
+      sorting_group_id: group_mode
       sorting_weight: 2
   - platform: template
     name: "Status CROPEX tablice"
@@ -183,6 +188,7 @@ switch:
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
     web_server:
+      sorting_group_id: group_mode
       sorting_weight: 3
     on_turn_on:
       - switch.turn_off: auto_balance_switch
@@ -193,6 +199,7 @@ switch:
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
     web_server:
+      sorting_group_id: group_mode
       sorting_weight: 4
     on_turn_on:
       - switch.turn_off: manual_limit_switch
@@ -203,6 +210,7 @@ switch:
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
     web_server:
+      sorting_group_id: group_mode
       sorting_weight: 5
     on_turn_on:
       - switch.turn_off: manual_limit_switch
@@ -289,7 +297,7 @@ button:
           id(active_min_price) = id(min_export_price).state;
           auto now = id(sntp_time).now();
           if (now.is_valid()) {
-            char buf[40];
+            char buf[32];
             snprintf(buf, sizeof(buf), "Spremljeno (%02d:%02d:%02d)", now.hour, now.minute, now.second);
             id(params_status).publish_state(buf);
           } else {
@@ -408,40 +416,46 @@ script:
             then:
               - lambda: |-
                   if (response->status_code == 200) {
-                    size_t p_idx = body.find("\"price\":[");
+                    size_t p_idx = body.find("\"price\"");
                     if (p_idx != std::string::npos) {
-                      size_t start = p_idx + 9;
-                      size_t end = body.find("]", start);
-                      std::string arr = body.substr(start, end - start);
-                      float vals[192];
-                      int n = 0;
-                      size_t pos = 0;
-                      while (pos < arr.length() && n < 192) {
-                        size_t comma = arr.find(',', pos);
-                        std::string tok = (comma == std::string::npos) ? arr.substr(pos) : arr.substr(pos, comma - pos);
-                        if (tok != "null" && !tok.empty()) {
-                          vals[n++] = atof(tok.c_str());
-                        }
-                        if (comma == std::string::npos) break;
-                        pos = comma + 1;
-                      }
-                      if (n >= 24) {
-                        int step = (n >= 96) ? 4 : 1;
-                        int hours_avail = n / step;
-                        int today_count = (hours_avail >= 24) ? 24 : hours_avail;
-                        for (int h = 0; h < today_count; h++) {
-                          id(cropex_today)[h] = vals[h * step];
-                        }
-                        if (hours_avail >= 48) {
-                          for (int h = 0; h < 24; h++) {
-                            id(cropex_tomorrow)[h] = vals[(24 + h) * step];
+                      size_t bracket = body.find("[", p_idx);
+                      size_t end = body.find("]", bracket);
+                      if (bracket != std::string::npos && end != std::string::npos) {
+                        std::string arr = body.substr(bracket + 1, end - bracket - 1);
+                        float vals[192];
+                        int n = 0;
+                        size_t pos = 0;
+                        while (pos < arr.length() && n < 192) {
+                          size_t comma = arr.find(',', pos);
+                          std::string tok = (comma == std::string::npos) ? arr.substr(pos) : arr.substr(pos, comma - pos);
+                          while (!tok.empty() && (tok[0] == ' ' || tok[0] == '\n' || tok[0] == '\r' || tok[0] == '\t')) tok.erase(0, 1);
+                          while (!tok.empty() && (tok.back() == ' ' || tok.back() == '\n' || tok.back() == '\r' || tok.back() == '\t')) tok.pop_back();
+                          if (tok != "null" && !tok.empty()) {
+                            vals[n++] = atof(tok.c_str());
                           }
-                          id(cropex_status).publish_state("OK: Učitano danas + sutra");
+                          if (comma == std::string::npos) break;
+                          pos = comma + 1;
+                        }
+                        if (n >= 24) {
+                          int step = (n >= 96) ? 4 : 1;
+                          int hours_avail = n / step;
+                          int today_count = (hours_avail >= 24) ? 24 : hours_avail;
+                          for (int h = 0; h < today_count; h++) {
+                            id(cropex_today)[h] = vals[h * step];
+                          }
+                          if (hours_avail >= 48) {
+                            for (int h = 0; h < 24; h++) {
+                              id(cropex_tomorrow)[h] = vals[(24 + h) * step];
+                            }
+                            id(cropex_status).publish_state("OK: Učitano danas + sutra");
+                          } else {
+                            id(cropex_status).publish_state("OK: Učitano za danas (24h)");
+                          }
                         } else {
-                          id(cropex_status).publish_state("OK: Učitano za danas (24h)");
+                          id(cropex_status).publish_state("Greška: Nepotpun odgovor");
                         }
                       } else {
-                        id(cropex_status).publish_state("Greška: Nepotpun odgovor");
+                        id(cropex_status).publish_state("Greška: Neispravan format");
                       }
                     } else {
                       id(cropex_status).publish_state("Greška: Nema polja cijena");
