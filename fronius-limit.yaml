@@ -412,6 +412,7 @@ script:
       - http_request.get:
           url: "https://api.energy-charts.info/price?bzn=HR"
           capture_response: true
+          max_response_buffer_size: 16384
           on_response:
             then:
               - lambda: |-
@@ -419,43 +420,38 @@ script:
                     size_t p_idx = body.find("\"price\"");
                     if (p_idx != std::string::npos) {
                       size_t bracket = body.find("[", p_idx);
-                      size_t end = body.find("]", bracket);
-                      if (bracket != std::string::npos && end != std::string::npos) {
-                        std::string arr = body.substr(bracket + 1, end - bracket - 1);
-                        float vals[192];
-                        int n = 0;
-                        size_t pos = 0;
-                        while (pos < arr.length() && n < 192) {
-                          size_t comma = arr.find(',', pos);
-                          std::string tok = (comma == std::string::npos) ? arr.substr(pos) : arr.substr(pos, comma - pos);
-                          while (!tok.empty() && (tok[0] == ' ' || tok[0] == '\n' || tok[0] == '\r' || tok[0] == '\t')) tok.erase(0, 1);
-                          while (!tok.empty() && (tok.back() == ' ' || tok.back() == '\n' || tok.back() == '\r' || tok.back() == '\t')) tok.pop_back();
-                          if (tok != "null" && !tok.empty()) {
-                            vals[n++] = atof(tok.c_str());
-                          }
-                          if (comma == std::string::npos) break;
-                          pos = comma + 1;
+                      size_t start = bracket + 1;
+                      size_t end = body.find("]", start);
+                      std::string arr = body.substr(start, end - start);
+                      float vals[192];
+                      int n = 0;
+                      size_t pos = 0;
+                      while (pos < arr.length() && n < 192) {
+                        size_t comma = arr.find(',', pos);
+                        std::string tok = (comma == std::string::npos) ? arr.substr(pos) : arr.substr(pos, comma - pos);
+                        if (tok != "null" && !tok.empty()) {
+                          vals[n++] = atof(tok.c_str());
                         }
-                        if (n >= 24) {
-                          int step = (n >= 96) ? 4 : 1;
-                          int hours_avail = n / step;
-                          int today_count = (hours_avail >= 24) ? 24 : hours_avail;
-                          for (int h = 0; h < today_count; h++) {
-                            id(cropex_today)[h] = vals[h * step];
+                        if (comma == std::string::npos) break;
+                        pos = comma + 1;
+                      }
+                      if (n >= 24) {
+                        int step = (n >= 96) ? 4 : 1;
+                        int hours_avail = n / step;
+                        int today_count = (hours_avail >= 24) ? 24 : hours_avail;
+                        for (int h = 0; h < today_count; h++) {
+                          id(cropex_today)[h] = vals[h * step];
+                        }
+                        if (hours_avail >= 48) {
+                          for (int h = 0; h < 24; h++) {
+                            id(cropex_tomorrow)[h] = vals[(24 + h) * step];
                           }
-                          if (hours_avail >= 48) {
-                            for (int h = 0; h < 24; h++) {
-                              id(cropex_tomorrow)[h] = vals[(24 + h) * step];
-                            }
-                            id(cropex_status).publish_state("OK: Učitano danas + sutra");
-                          } else {
-                            id(cropex_status).publish_state("OK: Učitano za danas (24h)");
-                          }
+                          id(cropex_status).publish_state("OK: Učitano danas + sutra");
                         } else {
-                          id(cropex_status).publish_state("Greška: Nepotpun odgovor");
+                          id(cropex_status).publish_state("OK: Učitano za danas (24h)");
                         }
                       } else {
-                        id(cropex_status).publish_state("Greška: Neispravan format");
+                        id(cropex_status).publish_state("Greška: Nepotpun odgovor");
                       }
                     } else {
                       id(cropex_status).publish_state("Greška: Nema polja cijena");
@@ -647,7 +643,7 @@ interval:
           id(house_load_w).publish_state(house_w);
 
           // Vizualni tok energije na vrhu stranice
-          char flow_buf[96];
+          char flow_buf[128];
           const char* sun_icon = (pv_w > 20.0) ? "☀️" : "🌙";
           if (grid_w < -15.0) {
             snprintf(flow_buf, sizeof(flow_buf), "%s %.0f W  ➔  🏠 %.0f W  ➔  ⚡ %.0f W (Izvoz)", sun_icon, pv_w, house_w, -grid_w);
