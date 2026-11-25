@@ -6,17 +6,9 @@ esphome:
     then:
       - lambda: |-
           id(params_status).publish_state("Spremno");
-          id(cropex_status).publish_state("Čeka 23:00h / automatski dohvat");
-          bool has_today = false;
-          for (int i = 0; i < 24; i++) {
-            if (id(cropex_today)[i] > -900.0) {
-              has_today = true;
-              break;
-            }
-          }
-          if (has_today) {
-            id(cropex_status).publish_state("OK: Učitano iz memorije");
-          }
+          id(cropex_status).publish_state("Čeka 23:00h / ručni dohvat");
+      - delay: 20s
+      - script.execute: fetch_cropex_prices
 
 esp32:
   board: esp32dev
@@ -51,17 +43,13 @@ wifi:
   ap:
     ssid: "Fronius-Limit-Setup"
     password: "12345678"
-  on_connect:
-    then:
-      - delay: 20s
-      - script.execute: fetch_cropex_prices
 
 captive_portal:
 improv_serial:
 
 http_request:
   verify_ssl: false
-  timeout: 12s
+  timeout: 15s
 
 time:
   - platform: sntp
@@ -78,7 +66,7 @@ time:
         hours: 23
         then:
           - lambda: |-
-              if (id(cropex_tomorrow)[12] <= -900.0) {
+              if (id(cropex_tomorrow)[0] <= -900.0) {
                 id(fetch_cropex_prices).execute();
               }
       - seconds: 0
@@ -86,21 +74,14 @@ time:
         hours: 0
         then:
           - lambda: |-
-              bool has_tmr = false;
-              for (int i = 0; i < 24; i++) {
-                if (id(cropex_tomorrow)[i] > -900.0) {
-                  has_tmr = true;
-                  break;
-                }
-              }
-              if (has_tmr) {
+              if (id(cropex_tomorrow)[0] > -900.0) {
                 for (int i = 0; i < 24; i++) {
                   id(cropex_today)[i] = id(cropex_tomorrow)[i];
                   id(cropex_tomorrow)[i] = -9999.0;
                 }
                 id(cropex_status).publish_state("Prebačeno na današnji dan");
               } else {
-                id(fetch_cropex_prices).execute();
+                id(cropex_status).publish_state("Sutrašnje cijene nisu bile učitane");
               }
       - seconds: 0
         minutes: 5
@@ -180,7 +161,7 @@ globals:
     type: float[24]
     restore_value: yes
     initial_value: '{-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999}'
-  - id: graf_listen_fd
+  - id: graf_sock
     type: int
     restore_value: no
     initial_value: '-1'
@@ -194,7 +175,7 @@ text_sensor:
       sorting_group_id: group_mode
       sorting_weight: 1
   - platform: template
-    name: "Grafički prikaz"
+    name: "Grafički prikaz (port 8080)"
     id: graf_url_info
     update_interval: never
     web_server:
@@ -355,7 +336,7 @@ button:
           id(active_min_price) = id(min_export_price).state;
           auto now = id(sntp_time).now();
           if (now.is_valid()) {
-            char buf[40];
+            char buf[48];
             snprintf(buf, sizeof(buf), "Spremljeno (%02d:%02d:%02d)", now.hour, now.minute, now.second);
             id(params_status).publish_state(buf);
           } else {
@@ -475,61 +456,55 @@ script:
             then:
               - lambda: |-
                   if (response->status_code == 200) {
-                    size_t p_idx = body.find("\"price\"");
+                    int p_idx = body.find("\"price\"");
                     if (p_idx != std::string::npos) {
-                      size_t bracket = body.find("[", p_idx);
-                      if (bracket != std::string::npos) {
-                        size_t start = bracket + 1;
-                        size_t end = body.find("]", start);
-                        std::string arr = body.substr(start, end - start);
-                        float vals[200];
-                        int n = 0;
-                        size_t pos = 0;
-                        while (pos < arr.length() && n < 200) {
-                          size_t comma = arr.find(',', pos);
-                          std::string tok = (comma == std::string::npos) ? arr.substr(pos) : arr.substr(pos, comma - pos);
-                          size_t first = tok.find_first_not_of(" \t\r\n");
-                          if (first != std::string::npos) {
-                            size_t last = tok.find_last_not_of(" \t\r\n");
-                            tok = tok.substr(first, last - first + 1);
-                          }
-                          if (tok != "null" && !tok.empty()) {
-                            vals[n++] = atof(tok.c_str());
-                          }
-                          if (comma == std::string::npos) break;
-                          pos = comma + 1;
+                      int bracket = body.find("[", p_idx);
+                      int start = bracket + 1;
+                      int end = body.find("]", start);
+                      std::string arr = body.substr(start, end - start);
+                      float vals[200];
+                      int n = 0;
+                      size_t pos = 0;
+                      while (pos < arr.length() && n < 200) {
+                        size_t comma = arr.find(',', pos);
+                        std::string tok = (comma == std::string::npos) ? arr.substr(pos) : arr.substr(pos, comma - pos);
+                        if (tok != "null" && !tok.empty()) {
+                          vals[n++] = atof(tok.c_str());
                         }
-                        if (n >= 24) {
-                          int step = (n >= 96) ? 4 : 1;
-                          int hours_avail = n / step;
-                          int today_count = (hours_avail >= 24) ? 24 : hours_avail;
-                          for (int h = 0; h < today_count; h++) {
-                            if (step == 4) {
-                              id(cropex_today)[h] = (vals[h*4] + vals[h*4+1] + vals[h*4+2] + vals[h*4+3]) / 4.0f;
-                            } else {
-                              id(cropex_today)[h] = vals[h];
-                            }
+                        if (comma == std::string::npos) break;
+                        pos = comma + 1;
+                      }
+                      if (n >= 24) {
+                        int step = (n >= 96) ? 4 : 1;
+                        int hours_avail = n / step;
+                        int today_count = (hours_avail >= 24) ? 24 : hours_avail;
+                        for (int h = 0; h < today_count; h++) {
+                          float sum = 0.0;
+                          for (int q = 0; q < step; q++) {
+                            sum += vals[h * step + q];
                           }
-                          if (hours_avail >= 48) {
-                            for (int h = 0; h < 24; h++) {
-                              int base = (24 + h) * 4;
-                              id(cropex_tomorrow)[h] = (vals[base] + vals[base+1] + vals[base+2] + vals[base+3]) / 4.0f;
+                          id(cropex_today)[h] = sum / (float)step;
+                        }
+                        if (hours_avail >= 48) {
+                          for (int h = 0; h < 24; h++) {
+                            float sum = 0.0;
+                            for (int q = 0; q < step; q++) {
+                              sum += vals[(24 + h) * step + q];
                             }
-                            id(cropex_status).publish_state("OK: Učitano danas + sutra (48h)");
-                          } else {
-                            id(cropex_status).publish_state("OK: Učitano za danas (24h)");
+                            id(cropex_tomorrow)[h] = sum / (float)step;
                           }
+                          id(cropex_status).publish_state("OK: Učitano danas + sutra (48h)");
                         } else {
-                          id(cropex_status).publish_state("Greška: Nepotpun odgovor");
+                          id(cropex_status).publish_state("OK: Učitano za danas (24h)");
                         }
                       } else {
-                        id(cropex_status).publish_state("Greška: Neispravan JSON");
+                        id(cropex_status).publish_state("Greška: Nepotpun odgovor");
                       }
                     } else {
                       id(cropex_status).publish_state("Greška: Nema polja cijena");
                     }
                   } else {
-                    char err[32];
+                    char err[40];
                     snprintf(err, sizeof(err), "HTTP greška: %d", response->status_code);
                     id(cropex_status).publish_state(err);
                   }
@@ -553,7 +528,7 @@ interval:
     then:
       - lambda: |-
           if (!id(my_wifi).is_connected()) return;
-          if (id(graf_listen_fd) < 0) {
+          if (id(graf_sock) < 0) {
             int s = ::lwip_socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
             if (s >= 0) {
               int opt = 1;
@@ -561,64 +536,57 @@ interval:
               int fl = ::lwip_fcntl(s, F_GETFL, 0);
               ::lwip_fcntl(s, F_SETFL, fl | O_NONBLOCK);
               struct sockaddr_in addr;
-              memset(&addr, 0, sizeof(addr));
               addr.sin_family = AF_INET;
               addr.sin_port = htons(8080);
               addr.sin_addr.s_addr = INADDR_ANY;
-              if (::lwip_bind(s, (struct sockaddr *)&addr, sizeof(addr)) == 0 && ::lwip_listen(s, 3) == 0) {
-                id(graf_listen_fd) = s;
-                if (id(ip_addr_sensor).state.length() > 6) {
-                  char u[96];
-                  snprintf(u, sizeof(u), "[Otvori grafiku (http://%s:8080)](http://%s:8080)",
-                           id(ip_addr_sensor).state.c_str(), id(ip_addr_sensor).state.c_str());
-                  id(graf_url_info).publish_state(u);
-                }
+              if (::lwip_bind(s, (struct sockaddr *)&addr, sizeof(addr)) == 0 && ::lwip_listen(s, 4) == 0) {
+                id(graf_sock) = s;
+                char u[64];
+                snprintf(u, sizeof(u), "http://%s:8080", id(ip_addr_sensor).state.c_str());
+                id(graf_url_info).publish_state(u);
               } else {
                 ::lwip_close(s);
               }
             }
           }
-          if (id(graf_listen_fd) >= 0) {
+          if (id(graf_sock) >= 0) {
             struct sockaddr_in caddr;
             socklen_t clen = sizeof(caddr);
-            int cfd = ::lwip_accept(id(graf_listen_fd), (struct sockaddr *)&caddr, &clen);
-            if (cfd >= 0) {
-              struct timeval rtv;
-              rtv.tv_sec = 0;
-              rtv.tv_usec = 300000;
-              ::lwip_setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &rtv, sizeof(rtv));
-              rtv.tv_sec = 2;
-              rtv.tv_usec = 0;
-              ::lwip_setsockopt(cfd, SOL_SOCKET, SO_SNDTIMEO, &rtv, sizeof(rtv));
+            int cl = ::lwip_accept(id(graf_sock), (struct sockaddr *)&caddr, &clen);
+            if (cl >= 0) {
+              struct timeval tv;
+              tv.tv_sec = 0;
+              tv.tv_usec = 300000;
+              ::lwip_setsockopt(cl, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+              ::lwip_setsockopt(cl, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
               char rbuf[256];
-              int r = ::lwip_recv(cfd, rbuf, sizeof(rbuf) - 1, 0);
+              int r = ::lwip_recv(cl, rbuf, sizeof(rbuf) - 1, 0);
               if (r > 0) {
-                rbuf[r] = '\0';
+                rbuf[r] = 0;
                 if (strstr(rbuf, "GET /data") != NULL) {
-                  float s_pv = std::isnan(id(pv_power_w).state) ? 0.0f : id(pv_power_w).state;
-                  float s_h = std::isnan(id(house_load_w).state) ? 0.0f : id(house_load_w).state;
-                  float s_g = std::isnan(id(grid_power_w).state) ? 0.0f : id(grid_power_w).state;
-                  float s_l = std::isnan(id(applied_limit_pct).state) ? 100.0f : id(applied_limit_pct).state;
-                  float s_b = std::isnan(id(month_balance_kwh).state) ? 0.0f : id(month_balance_kwh).state;
-                  float s_c = std::isnan(id(current_cropex_price).state) ? -999.0f : id(current_cropex_price).state;
-                  const char* st_str = id(modbus_status).state.empty() ? "Spremno" : id(modbus_status).state.c_str();
-                  char jbody[256];
-                  int jlen = snprintf(jbody, sizeof(jbody),
+                  float pv = std::isnan(id(pv_power_w).state) ? 0.0f : id(pv_power_w).state;
+                  float hs = std::isnan(id(house_load_w).state) ? 0.0f : id(house_load_w).state;
+                  float gr = std::isnan(id(grid_power_w).state) ? 0.0f : id(grid_power_w).state;
+                  float lm = std::isnan(id(applied_limit_pct).state) ? 100.0f : id(applied_limit_pct).state;
+                  float bl = std::isnan(id(month_balance_kwh).state) ? 0.0f : id(month_balance_kwh).state;
+                  float cr = std::isnan(id(current_cropex_price).state) ? -999.0f : id(current_cropex_price).state;
+                  const char* st = id(modbus_status).state.empty() ? "Spremno" : id(modbus_status).state.c_str();
+                  char body[256];
+                  int blen = snprintf(body, sizeof(body),
                     "{\"pv\":%.1f,\"house\":%.1f,\"grid\":%.1f,\"lim\":%.1f,\"bal\":%.1f,\"crp\":%.2f,\"st\":\"%s\"}",
-                    s_pv, s_h, s_g, s_l, s_b, s_c, st_str);
+                    pv, hs, gr, lm, bl, cr, st);
                   char resp[512];
                   int tlen = snprintf(resp, sizeof(resp),
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
-                    jlen, jbody);
+                    blen, body);
                   int sent = 0;
                   while (sent < tlen) {
-                    int w = ::lwip_send(cfd, resp + sent, tlen - sent, 0);
-                    if (w <= 0) break;
-                    sent += w;
+                    int n = ::lwip_send(cl, resp + sent, tlen - sent, 0);
+                    if (n <= 0) break;
+                    sent += n;
                   }
                 } else {
                   static const char page[] =
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nConnection: close\r\n\r\n"
                     "<!DOCTYPE html><html lang='hr'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Solarni nadzor</title>"
                     "<style>body{margin:0;background:#0f172a;color:#f8fafc;font-family:system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;padding:16px}"
                     "h2{margin:6px 0 14px;font-size:20px;font-weight:600;color:#e2e8f0}.box{width:100%;max-width:440px;background:#1e293b;border-radius:16px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,.4)}"
@@ -642,7 +610,7 @@ interval:
                     "<text id='t_gl' x='290' y='191' text-anchor='middle' fill='#4ade80' font-size='10' font-weight='bold'>MREŽA</text>"
                     "<text id='t_g' x='290' y='206' text-anchor='middle' fill='#fff' font-size='12' font-weight='bold'>0 W</text>"
                     "</svg>"
-                    "<div class='mode' id='m_txt'>Spajanje...</div>"
+                    "<div class='mode' id='m_txt'>Učitavanje...</div>"
                     "<div class='cards'>"
                     "<div class='card'><div class='lbl'>Limit inv.</div><div class='val' id='v_lim'>-- %</div></div>"
                     "<div class='card'><div class='lbl'>Bilanca mj.</div><div class='val' id='v_bal'>-- kWh</div></div>"
@@ -666,16 +634,26 @@ interval:
                     "lpvg.setAttribute('stroke','#334155');lpvg.classList.remove('anim');lgh.setAttribute('stroke','#334155');lgh.classList.remove('anim');}"
                     "}).catch(()=>{});}upd();setInterval(upd,3000);</script></body></html>";
                   int plen = sizeof(page) - 1;
+                  char hdr[160];
+                  int hlen = snprintf(hdr, sizeof(hdr),
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: %d\r\nConnection: close\r\n\r\n",
+                    plen);
+                  int hsent = 0;
+                  while (hsent < hlen) {
+                    int n = ::lwip_send(cl, hdr + hsent, hlen - hsent, 0);
+                    if (n <= 0) break;
+                    hsent += n;
+                  }
                   int sent = 0;
                   while (sent < plen) {
-                    int w = ::lwip_send(cfd, page + sent, plen - sent, 0);
-                    if (w <= 0) break;
-                    sent += w;
+                    int n = ::lwip_send(cl, page + sent, plen - sent, 0);
+                    if (n <= 0) break;
+                    sent += n;
                   }
                 }
               }
-              delay(5);
-              ::lwip_close(cfd);
+              delay(50);
+              ::lwip_close(cl);
             }
           }
   - interval: 6s
@@ -685,12 +663,6 @@ interval:
             id(comm_ok) = false;
             id(modbus_status).publish_state("Nema Wi-Fi veze");
             return;
-          }
-          if (id(ip_addr_sensor).state.length() > 6 && id(graf_url_info).state.empty()) {
-            char u[96];
-            snprintf(u, sizeof(u), "[Otvori grafiku (http://%s:8080)](http://%s:8080)",
-                     id(ip_addr_sensor).state.c_str(), id(ip_addr_sensor).state.c_str());
-            id(graf_url_info).publish_state(u);
           }
           int sock = ::lwip_socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
           if (sock < 0) {
