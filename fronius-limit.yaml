@@ -528,7 +528,7 @@ interval:
                 ::lwip_fcntl(s, F_SETFL, fl | O_NONBLOCK);
                 id(graf_sock) = s;
                 char u[48];
-                snprintf(u, sizeof(u), "http://%s:8080", id(my_wifi).get_ip_address().str().c_str());
+                snprintf(u, sizeof(u), "http://%s:8080", id(my_wifi).get_ip_address()[0].str().c_str());
                 id(graf_url_info).publish_state(u);
               } else {
                 ::lwip_close(s);
