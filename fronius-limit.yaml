@@ -6,7 +6,20 @@ esphome:
     then:
       - lambda: |-
           id(params_status).publish_state("Spremno");
-          id(cropex_status).publish_state("Čeka učitavanje (20s nakon spajanja)...");
+          auto now = id(sntp_time).now();
+          if (now.is_valid() && id(cropex_today)[now.hour] > -900.0) {
+            char st_buf[96];
+            if (id(cropex_tomorrow)[12] > -900.0) {
+              snprintf(st_buf, sizeof(st_buf), "Danas (%02d.%02d.): Učitano 24h | Sutra: Učitano 24h", now.day_of_month, now.month);
+            } else {
+              snprintf(st_buf, sizeof(st_buf), "Danas (%02d.%02d.): Učitano 24h | Sutra: Čeka objavu (15h)", now.day_of_month, now.month);
+            }
+            id(cropex_status).publish_state(st_buf);
+          } else {
+            id(cropex_status).publish_state("Čeka dohvat CROPEX cijena...");
+          }
+      - delay: 20s
+      - script.execute: fetch_cropex_prices
 
 esp32:
   board: esp32dev
@@ -41,10 +54,6 @@ wifi:
   ap:
     ssid: "Fronius-Limit-Setup"
     password: "12345678"
-  on_connect:
-    then:
-      - delay: 20s
-      - script.execute: fetch_cropex_prices
 
 captive_portal:
 improv_serial:
@@ -60,43 +69,47 @@ time:
     on_time:
       - seconds: 0
         minutes: 0
-        hours: 14
+        hours: 15
         then:
           - script.execute: fetch_cropex_prices
       - seconds: 0
         minutes: 0
         hours: 23
         then:
-          - lambda: |-
-              if (id(cropex_tomorrow)[0] <= -900.0) {
-                id(fetch_cropex_prices).execute();
-              }
+          - script.execute: fetch_cropex_prices
       - seconds: 0
         minutes: 30
         hours: 5
         then:
-          - lambda: |-
-              if (id(cropex_today)[0] <= -900.0) {
-                id(fetch_cropex_prices).execute();
-              }
+          - script.execute: fetch_cropex_prices
       - seconds: 0
         minutes: 0
         hours: 0
         then:
           - lambda: |-
-              if (id(cropex_tomorrow)[0] > -900.0) {
+              auto now = id(sntp_time).now();
+              bool has_tom = false;
+              for (int i = 0; i < 24; i++) {
+                if (id(cropex_tomorrow)[i] > -900.0) has_tom = true;
+              }
+              if (has_tom) {
                 for (int i = 0; i < 24; i++) {
                   id(cropex_today)[i] = id(cropex_tomorrow)[i];
                   id(cropex_tomorrow)[i] = -9999.0;
                 }
-                auto now = id(sntp_time).now();
+                char st_buf[96];
                 if (now.is_valid()) {
-                  char st_buf[96];
-                  snprintf(st_buf, sizeof(st_buf), "Danas (%02d.%02d.): Učitano 24h | Sutra: Čeka objavu (14h)", now.day_of_month, now.month);
-                  id(cropex_status).publish_state(st_buf);
+                  snprintf(st_buf, sizeof(st_buf), "Danas (%02d.%02d.): Učitano 24h | Sutra: Čeka objavu (15h)", now.day_of_month, now.month);
                 } else {
-                  id(cropex_status).publish_state("Danas: Učitano 24h | Sutra: Čeka objavu (14h)");
+                  snprintf(st_buf, sizeof(st_buf), "Danas: Učitano 24h | Sutra: Čeka objavu (15h)");
                 }
+                id(cropex_status).publish_state(st_buf);
+              }
+          - delay: 5m
+          - lambda: |-
+              auto now = id(sntp_time).now();
+              if (now.is_valid() && id(cropex_today)[now.hour] <= -900.0) {
+                id(fetch_cropex_prices)->execute();
               }
 
 output:
@@ -160,11 +173,11 @@ globals:
   - id: cropex_today
     type: float[24]
     restore_value: yes
-    initial_value: '{-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999}'
+    initial_value: '{-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0}'
   - id: cropex_tomorrow
     type: float[24]
     restore_value: yes
-    initial_value: '{-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999,-9999}'
+    initial_value: '{-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0,-9999.0}'
   - id: graf_srv_fd
     type: int
     restore_value: no
@@ -179,18 +192,18 @@ text_sensor:
       sorting_group_id: group_mode
       sorting_weight: 1
   - platform: template
-    name: "Status sustava"
-    id: modbus_status
-    web_server:
-      sorting_group_id: group_mode
-      sorting_weight: 2
-  - platform: template
-    name: "Grafički prikaz (upiši u preglednik)"
+    name: "Grafički prikaz (port 8080)"
     id: graf_url_info
     update_interval: never
     web_server:
       sorting_group_id: group_mode
-      sorting_weight: 6
+      sorting_weight: 2
+  - platform: template
+    name: "Status sustava"
+    id: modbus_status
+    web_server:
+      sorting_group_id: group_mode
+      sorting_weight: 3
   - platform: template
     name: "Status CROPEX tablice"
     id: cropex_status
@@ -232,7 +245,7 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     web_server:
       sorting_group_id: group_mode
-      sorting_weight: 3
+      sorting_weight: 4
     on_turn_on:
       - switch.turn_off: auto_balance_switch
       - switch.turn_off: cropex_limit_switch
@@ -243,7 +256,7 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     web_server:
       sorting_group_id: group_mode
-      sorting_weight: 4
+      sorting_weight: 5
     on_turn_on:
       - switch.turn_off: manual_limit_switch
       - switch.turn_off: cropex_limit_switch
@@ -254,7 +267,7 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     web_server:
       sorting_group_id: group_mode
-      sorting_weight: 5
+      sorting_weight: 6
     on_turn_on:
       - switch.turn_off: manual_limit_switch
       - switch.turn_off: auto_balance_switch
@@ -453,18 +466,31 @@ script:
       - lambda: |-
           id(cropex_status).publish_state("Preuzimam CROPEX (HR)...");
       - http_request.get:
-          url: "https://api.energy-charts.info/price?bzn=HR"
+          url: !lambda |-
+            auto now = id(sntp_time).now();
+            if (now.is_valid()) {
+              time_t t_tom = now.timestamp + 86400;
+              auto tom = esphome::ESPTime::from_epoch_local(t_tom);
+              char url_buf[128];
+              snprintf(url_buf, sizeof(url_buf),
+                       "https://api.energy-charts.info/price?bzn=HR&start=%04d-%02d-%02d&end=%04d-%02d-%02d",
+                       now.year, now.month, now.day_of_month,
+                       tom.year, tom.month, tom.day_of_month);
+              return std::string(url_buf);
+            }
+            return std::string("https://api.energy-charts.info/price?bzn=HR");
           capture_response: true
           max_response_buffer_size: 32768
           on_response:
             then:
               - lambda: |-
+                  auto now = id(sntp_time).now();
                   if (response->status_code == 200) {
-                    size_t p_idx = body.find("\"price\"");
+                    int p_idx = body.find("\"price\"");
                     if (p_idx != std::string::npos) {
-                      size_t bracket = body.find("[", p_idx);
-                      size_t start = bracket + 1;
-                      size_t end = body.find("]", start);
+                      int bracket = body.find("[", p_idx);
+                      int start = bracket + 1;
+                      int end = body.find("]", start);
                       std::string arr = body.substr(start, end - start);
                       float vals[200];
                       int n = 0;
@@ -472,18 +498,12 @@ script:
                       while (pos < arr.length() && n < 200) {
                         size_t comma = arr.find(',', pos);
                         std::string tok = (comma == std::string::npos) ? arr.substr(pos) : arr.substr(pos, comma - pos);
-                        size_t f = tok.find_first_not_of(" \t\r\n");
-                        if (f != std::string::npos) {
-                          size_t l = tok.find_last_not_of(" \t\r\n");
-                          tok = tok.substr(f, l - f + 1);
-                        }
                         if (tok != "null" && !tok.empty()) {
                           vals[n++] = atof(tok.c_str());
                         }
                         if (comma == std::string::npos) break;
                         pos = comma + 1;
                       }
-                      auto now = id(sntp_time).now();
                       if (n >= 24) {
                         int step = (n >= 96) ? 4 : 1;
                         int hours_avail = n / step;
@@ -495,6 +515,7 @@ script:
                             id(cropex_today)[h] = vals[h];
                           }
                         }
+                        char st_buf[110];
                         if (hours_avail >= 48) {
                           for (int h = 0; h < 24; h++) {
                             int idx = (24 + h) * step;
@@ -505,26 +526,21 @@ script:
                             }
                           }
                           if (now.is_valid()) {
-                            int tom_d = now.day_of_month + 1;
-                            int tom_m = now.month;
-                            int days_in_m = 31;
-                            if (tom_m == 4 || tom_m == 6 || tom_m == 9 || tom_m == 11) days_in_m = 30;
-                            else if (tom_m == 2) days_in_m = (now.year % 4 == 0) ? 29 : 28;
-                            if (tom_d > days_in_m) { tom_d = 1; tom_m++; if (tom_m > 12) tom_m = 1; }
-                            char st_buf[96];
-                            snprintf(st_buf, sizeof(st_buf), "Danas (%02d.%02d.): Učitano 24h | Sutra (%02d.%02d.): Učitano 24h", now.day_of_month, now.month, tom_d, tom_m);
-                            id(cropex_status).publish_state(st_buf);
+                            auto tom = esphome::ESPTime::from_epoch_local(now.timestamp + 86400);
+                            snprintf(st_buf, sizeof(st_buf), "Danas (%02d.%02d.): Učitano 24h | Sutra (%02d.%02d.): Učitano 24h",
+                                     now.day_of_month, now.month, tom.day_of_month, tom.month);
                           } else {
-                            id(cropex_status).publish_state("Danas: Učitano 24h | Sutra: Učitano 24h");
+                            snprintf(st_buf, sizeof(st_buf), "Danas: Učitano 24h | Sutra: Učitano 24h");
                           }
+                          id(cropex_status).publish_state(st_buf);
                         } else {
                           if (now.is_valid()) {
-                            char st_buf[96];
-                            snprintf(st_buf, sizeof(st_buf), "Danas (%02d.%02d.): Učitano 24h | Sutra: Čeka objavu (14h)", now.day_of_month, now.month);
-                            id(cropex_status).publish_state(st_buf);
+                            snprintf(st_buf, sizeof(st_buf), "Danas (%02d.%02d.): Učitano 24h | Sutra: Čeka objavu (15h)",
+                                     now.day_of_month, now.month);
                           } else {
-                            id(cropex_status).publish_state("Danas: Učitano 24h | Sutra: Čeka objavu (14h)");
+                            snprintf(st_buf, sizeof(st_buf), "Danas: Učitano 24h | Sutra: Čeka objavu (15h)");
                           }
+                          id(cropex_status).publish_state(st_buf);
                         }
                       } else {
                         id(cropex_status).publish_state("Greška: Nepotpun odgovor burze");
@@ -533,26 +549,16 @@ script:
                       id(cropex_status).publish_state("Greška: Nema polja cijena");
                     }
                   } else {
-                    char err[64];
+                    char err[48];
                     snprintf(err, sizeof(err), "HTTP greška: %d", response->status_code);
                     id(cropex_status).publish_state(err);
                   }
           on_error:
             then:
               - lambda: |-
-                  id(cropex_status).publish_state("Greška spajanja (koristim spremljeno)");
+                  id(cropex_status).publish_state("Greška spajanja na CROPEX");
 
 interval:
-  - interval: 300ms
-    then:
-      - lambda: |-
-          if (id(comm_ok)) {
-            id(blue_led).turn_on();
-          } else {
-            id(led_blink_state) = !id(led_blink_state);
-            if (id(led_blink_state)) id(blue_led).turn_on();
-            else id(blue_led).turn_off();
-          }
   - interval: 100ms
     then:
       - lambda: |-
@@ -562,19 +568,18 @@ interval:
             if (s >= 0) {
               int opt = 1;
               ::lwip_setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+              int fl = ::lwip_fcntl(s, F_GETFL, 0);
+              ::lwip_fcntl(s, F_SETFL, fl | O_NONBLOCK);
               struct sockaddr_in addr;
+              memset(&addr, 0, sizeof(addr));
               addr.sin_family = AF_INET;
               addr.sin_port = htons(8080);
-              addr.sin_addr.s_addr = INADDR_ANY;
-              if (::lwip_bind(s, (struct sockaddr *)&addr, sizeof(addr)) == 0 && ::lwip_listen(s, 4) == 0) {
-                int fl = ::lwip_fcntl(s, F_GETFL, 0);
-                ::lwip_fcntl(s, F_SETFL, fl | O_NONBLOCK);
+              addr.sin_addr.s_addr = htonl(INADDR_ANY);
+              if (::lwip_bind(s, (struct sockaddr *)&addr, sizeof(addr)) == 0 && ::lwip_listen(s, 2) == 0) {
                 id(graf_srv_fd) = s;
-                if (id(ip_addr_sensor).state.length() > 6) {
-                  char u[96];
-                  snprintf(u, sizeof(u), "http://%s:8080", id(ip_addr_sensor).state.c_str());
-                  id(graf_url_info).publish_state(u);
-                }
+                char u[80];
+                snprintf(u, sizeof(u), "http://%s:8080", id(ip_addr_sensor).state.c_str());
+                id(graf_url_info).publish_state(u);
               } else {
                 ::lwip_close(s);
               }
@@ -585,44 +590,44 @@ interval:
             socklen_t clen = sizeof(caddr);
             int cl = ::lwip_accept(id(graf_srv_fd), (struct sockaddr *)&caddr, &clen);
             if (cl >= 0) {
-              struct timeval tv;
-              tv.tv_sec = 0;
-              tv.tv_usec = 300000;
-              ::lwip_setsockopt(cl, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-              char req[256] = {0};
+              struct timeval rtv;
+              rtv.tv_sec = 0;
+              rtv.tv_usec = 200000;
+              ::lwip_setsockopt(cl, SOL_SOCKET, SO_RCVTIMEO, &rtv, sizeof(rtv));
+              char req[256];
               int r = ::lwip_recv(cl, req, sizeof(req) - 1, 0);
               if (r > 0) {
-                if (strstr(req, "GET /data") != NULL) {
+                req[r] = 0;
+                if (strstr(req, "GET /data") != nullptr) {
                   float v_pv = std::isnan(id(pv_power_w).state) ? 0.0f : id(pv_power_w).state;
                   float v_h = std::isnan(id(house_load_w).state) ? 0.0f : id(house_load_w).state;
                   float v_g = std::isnan(id(grid_power_w).state) ? 0.0f : id(grid_power_w).state;
                   float v_l = std::isnan(id(applied_limit_pct).state) ? 100.0f : id(applied_limit_pct).state;
                   float v_b = std::isnan(id(month_balance_kwh).state) ? 0.0f : id(month_balance_kwh).state;
                   float v_c = std::isnan(id(current_cropex_price).state) ? -999.0f : id(current_cropex_price).state;
-                  const char* st_s = id(modbus_status).state.empty() ? "Spremno" : id(modbus_status).state.c_str();
-                  char json[384];
-                  snprintf(json, sizeof(json),
+                  char body_j[256];
+                  snprintf(body_j, sizeof(body_j),
                     "{\"pv\":%.1f,\"house\":%.1f,\"grid\":%.1f,\"lim\":%.1f,\"bal\":%.1f,\"crp\":%.2f,\"st\":\"%s\"}",
-                    v_pv, v_h, v_g, v_l, v_b, v_c, st_s);
+                    v_pv, v_h, v_g, v_l, v_b, v_c, id(modbus_status).state.c_str());
                   char resp[512];
                   int len = snprintf(resp, sizeof(resp),
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
-                    (int)strlen(json), json);
+                    (int)strlen(body_j), body_j);
                   int sent = 0;
                   while (sent < len) {
-                    int n = ::lwip_send(cl, resp + sent, len - sent, 0);
-                    if (n <= 0) break;
-                    sent += n;
+                    int w = ::lwip_send(cl, resp + sent, len - sent, 0);
+                    if (w <= 0) break;
+                    sent += w;
                   }
                 } else {
-                  static const char page[] =
+                  static const char* page =
                     "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nConnection: close\r\n\r\n"
                     "<!DOCTYPE html><html lang='hr'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Solarni nadzor</title>"
                     "<style>body{margin:0;background:#0f172a;color:#f8fafc;font-family:system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;padding:16px}"
                     "h2{margin:6px 0 14px;font-size:20px;font-weight:600;color:#e2e8f0}.box{width:100%;max-width:440px;background:#1e293b;border-radius:16px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,.4)}"
                     ".cards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.card{background:#0f172a;border-radius:10px;padding:10px 6px;text-align:center}"
                     ".lbl{font-size:11px;color:#94a3b8;margin-bottom:4px}.val{font-size:15px;font-weight:700}"
-                    ".btn{display:block;width:100%;margin-top:14px;padding:12px;background:#334155;color:#fff;text-align:center;text-decoration:none;border-radius:10px;font-weight:600;font-size:14px;box-sizing:border-box}"
+                    ".btn{display:block;width:100%;margin-top:14px;padding:12px 0;background:#334155;color:#fff;text-align:center;text-decoration:none;border-radius:10px;font-weight:600;font-size:14px}"
                     ".mode{text-align:center;margin-top:10px;font-size:13px;color:#38bdf8;font-weight:600}"
                     "@keyframes flow{to{stroke-dashoffset:-24}}.anim{stroke-dasharray:6 6;animation:flow 1s linear infinite}</style></head><body>"
                     "<h2>Solarni sustav – tokovi energije</h2><div class='box'>"
@@ -663,18 +668,28 @@ interval:
                     "else{cg.setAttribute('stroke','#64748b');tgl.setAttribute('fill','#94a3b8');tgl.textContent='MREŽA';tg.textContent='0 W';"
                     "lpvg.setAttribute('stroke','#334155');lpvg.classList.remove('anim');lgh.setAttribute('stroke','#334155');lgh.classList.remove('anim');}"
                     "}).catch(()=>{});}upd();setInterval(upd,3000);</script></body></html>";
-                  int plen = sizeof(page) - 1;
+                  int plen = (int)strlen(page);
                   int sent = 0;
                   while (sent < plen) {
-                    int n = ::lwip_send(cl, page + sent, plen - sent, 0);
-                    if (n <= 0) break;
-                    sent += n;
+                    int w = ::lwip_send(cl, page + sent, plen - sent, 0);
+                    if (w <= 0) break;
+                    sent += w;
                   }
                 }
               }
-              delay(50);
+              delay(60);
               ::lwip_close(cl);
             }
+          }
+  - interval: 300ms
+    then:
+      - lambda: |-
+          if (id(comm_ok)) {
+            id(blue_led).turn_on();
+          } else {
+            id(led_blink_state) = !id(led_blink_state);
+            if (id(led_blink_state)) id(blue_led).turn_on();
+            else id(blue_led).turn_off();
           }
   - interval: 6s
     then:
@@ -683,11 +698,6 @@ interval:
             id(comm_ok) = false;
             id(modbus_status).publish_state("Nema Wi-Fi veze");
             return;
-          }
-          if (id(ip_addr_sensor).state.length() > 6 && id(graf_url_info).state.empty()) {
-            char u[96];
-            snprintf(u, sizeof(u), "http://%s:8080", id(ip_addr_sensor).state.c_str());
-            id(graf_url_info).publish_state(u);
           }
           int sock = ::lwip_socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
           if (sock < 0) {
@@ -846,8 +856,7 @@ interval:
           if (house_w < 0) house_w = 0;
           id(house_load_w).publish_state(house_w);
 
-          // Vizualni tok energije na vrhu stranice
-          char flow_buf[128];
+          char flow_buf[96];
           const char* sun_icon = (pv_w > 20.0) ? "☀️" : "🌙";
           if (grid_w < -15.0) {
             snprintf(flow_buf, sizeof(flow_buf), "%s %.0f W  ➔  🏠 %.0f W  ➔  ⚡ %.0f W (Izvoz)", sun_icon, pv_w, house_w, -grid_w);
@@ -858,7 +867,6 @@ interval:
           }
           id(energy_flow_visual).publish_state(flow_buf);
 
-          // Ažuriranje trenutne CROPEX cijene za tekući sat
           float crp_now = -9999.0;
           if (now.is_valid() && now.hour >= 0 && now.hour < 24) {
             crp_now = id(cropex_today)[now.hour];
@@ -869,7 +877,6 @@ interval:
             id(current_cropex_price).publish_state(NAN);
           }
 
-          // 4. Izračun ciljanog limita invertera po odabranom režimu
           float max_w = id(active_max_w);
           if (max_w < 100.0) max_w = 4000.0;
           float allowed_export = id(active_export_w);
